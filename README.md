@@ -198,7 +198,7 @@ repository, then set:
 | Field | Value |
 | --- | --- |
 | Framework preset | None |
-| Build command | `cd client && npm install --legacy-peer-deps && npm run build` |
+| Build command | `cd client && npm install && npm run build` |
 | Build output directory | `client/dist` |
 | Environment variable | `VITE_API_URL` = the Worker URL from step 2 |
 
@@ -230,7 +230,7 @@ The manual fallback, from your own machine:
 
 ```
 cd worker
-npm install --legacy-peer-deps
+npm install
 npx wrangler login
 npx wrangler deploy
 ```

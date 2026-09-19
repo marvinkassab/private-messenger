@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "description": "End-to-end encrypted messenger on the Signal protocol, running on Cloudflare.",
   "scripts": {
-    "install:all": "cd client && npm install --legacy-peer-deps && cd ../worker && npm install --legacy-peer-deps",
+    "install:all": "cd client && npm install && cd ../worker && npm install",
     "test": "cd worker && npm test && cd ../client && npm test",
     "build": "cd client && npm run build",
     "dev:worker": "cd worker && npm run dev",

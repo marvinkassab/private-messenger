@@ -14,9 +14,9 @@ jobs:
         with:
           node-version: 22
       - name: Install (worker)
-        run: cd worker && npm install --legacy-peer-deps
+        run: cd worker && npm install
       - name: Install (client)
-        run: cd client && npm install --legacy-peer-deps
+        run: cd client && npm install
       - name: Typecheck and test (worker)
         run: cd worker && npm run typecheck && npm test
       # The test pool runs the Worker under a Node shim, so a dependency that
