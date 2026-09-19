@@ -7,18 +7,65 @@
 //   Authorization: Signal <username>:<deviceId>:<ts>:<base64 sig>
 //
 // The identity key is the 33-byte Signal key (0x05 || 32-byte Curve25519
-// Montgomery public key). The curve library wants the 32 raw bytes.
+// Montgomery public key).
+//
+// Verification is implemented here rather than taken from the Signal
+// libraries, because those ship an Emscripten build that reads `__dirname` at
+// load time. That works under Node and under the test harness's Node shim,
+// but the Workers runtime has no `__dirname`, so importing it prevented the
+// Worker from starting at all. This is pure arithmetic over @noble/curves and
+// runs anywhere.
 
-import { Curve25519Wrapper } from "@privacyresearch/curve25519-typescript";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { ApiError } from "./types";
 import { b64Decode, constantTimeEqual, isValidUsername, nowSeconds, sha256Hex, utf8 } from "./util";
 
 export const AUTH_WINDOW_SECONDS = 300;
 
-let curvePromise: Promise<Curve25519Wrapper> | undefined;
-function curve(): Promise<Curve25519Wrapper> {
-  if (!curvePromise) curvePromise = Curve25519Wrapper.create();
-  return curvePromise;
+const FIELD_P = 2n ** 255n - 19n;
+
+/** Modular inverse by Fermat's little theorem; p is prime. */
+function invert(a: bigint): bigint {
+  let result = 1n;
+  let base = ((a % FIELD_P) + FIELD_P) % FIELD_P;
+  let e = FIELD_P - 2n;
+  while (e > 0n) {
+    if (e & 1n) result = (result * base) % FIELD_P;
+    base = (base * base) % FIELD_P;
+    e >>= 1n;
+  }
+  return result;
+}
+
+function leToBigInt(bytes: Uint8Array): bigint {
+  let n = 0n;
+  for (let i = bytes.length - 1; i >= 0; i--) n = (n << 8n) | BigInt(bytes[i]);
+  return n;
+}
+
+/**
+ * XEdDSA's `convert_mont`: the Montgomery u-coordinate of a Curve25519 public
+ * key becomes the Edwards y-coordinate, y = (u - 1) / (u + 1).
+ *
+ * The sign bit is left zero here and supplied by the caller, because libsignal
+ * carries the Edwards key's sign bit in the unused top bit of the signature's
+ * s value rather than deriving it. Verification has to move it back before the
+ * Ed25519 check, or every signature from a key with sign bit 1 is rejected.
+ */
+function montgomeryToEdwards(u32: Uint8Array): Uint8Array | null {
+  const u = leToBigInt(u32) & ((1n << 255n) - 1n);
+  if (u >= FIELD_P) return null;
+  const denominator = (u + 1n) % FIELD_P;
+  if (denominator === 0n) return null;
+  const y = ((u + FIELD_P - 1n) % FIELD_P) * invert(denominator) % FIELD_P;
+  const out = new Uint8Array(32);
+  let t = y;
+  for (let i = 0; i < 32; i++) {
+    out[i] = Number(t & 0xffn);
+    t >>= 8n;
+  }
+  out[31] &= 0x7f; // XEdDSA fixes the sign bit at zero
+  return out;
 }
 
 /** Strips the 0x05 prefix. Returns null when the key is not a 33-byte Signal key. */
@@ -36,8 +83,14 @@ export async function verifyIdentitySignature(
   const raw = rawIdentityKey(identityKey);
   if (!raw || signature.length !== 64) return false;
   try {
-    const c = await curve();
-    return c.signatureIsValid(toBuffer(raw), toBuffer(message), toBuffer(signature));
+    const edwards = montgomeryToEdwards(raw);
+    if (!edwards) return false;
+    // Move the signer's sign bit out of the signature and onto the key, then
+    // clear it, which is exactly what libsignal's curve25519_verify does.
+    edwards[31] = (edwards[31] & 0x7f) | (signature[63] & 0x80);
+    const sig = Uint8Array.from(signature);
+    sig[63] &= 0x7f;
+    return ed25519.verify(sig, message, edwards, { zip215: false });
   } catch {
     return false;
   }

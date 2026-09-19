@@ -930,9 +930,7 @@ export class MessengerImpl implements Messenger {
   private async handleIncomingProfile(sender: string, profile: { name?: string; deliveryToken?: string }): Promise<void> {
     let contact = await this.store.get<StoredContact>("contacts", sender);
     const now = Date.now();
-    let isNew = false;
     if (!contact) {
-      isNew = true;
       const theirKey = await this.signalStore.getTrustedIdentity(sender);
       contact = { username: sender, verified: false, addedAt: now, hasDeliveryToken: false, identityKeyB64: theirKey ? b64Encode(theirKey) : "" };
     }
@@ -953,7 +951,6 @@ export class MessengerImpl implements Messenger {
     } else if (profile.name && chat.title !== profile.name) {
       await this.updateChat(chatId, { title: profile.name });
     }
-    if (isNew) void chat; // chat already created above; kept for clarity
 
     if (!contact.profileSent) {
       contact.profileSent = true;

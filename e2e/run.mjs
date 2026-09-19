@@ -152,6 +152,8 @@ try {
   check(errs.length === 0, "no page errors" + (errs.length ? ": " + errs.slice(0, 5).join(" | ") : ""));
   await browser.close();
   for (const p of procs) p.kill("SIGTERM");
+  // Leaving this behind overrides ALLOWED_ORIGINS for the worker's own tests.
+  fs.rmSync(path.join(ROOT, "worker", ".dev.vars"), { force: true });
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL PASSED");
   process.exit(failures ? 1 : 0);
 }

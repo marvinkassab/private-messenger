@@ -19,5 +19,10 @@ jobs:
         run: cd client && npm install --legacy-peer-deps
       - name: Typecheck and test (worker)
         run: cd worker && npm run typecheck && npm test
+      # The test pool runs the Worker under a Node shim, so a dependency that
+      # only works in Node passes every test and then fails to boot on
+      # Cloudflare. This starts the real runtime and checks it answers.
+      - name: Verify the Worker boots on the Cloudflare runtime
+        run: cd worker && npm run verify:runtime
       - name: Typecheck, build and test (client)
         run: cd client && npm run build && npm test
