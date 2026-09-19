@@ -1,0 +1,24 @@
+name = "private-messenger"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+
+[durable_objects]
+bindings = [
+  { name = "MAILBOX", class_name = "Mailbox" },
+  { name = "INVITE", class_name = "Invite" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Mailbox", "Invite"]
+
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "private-messenger-attachments"
+
+# Secrets (set with `wrangler secret put`): VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
+# VAPID_SUBJECT, BOOTSTRAP_INVITE

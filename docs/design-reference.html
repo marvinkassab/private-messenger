@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Private Messenger</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="End-to-end encrypted group chat for friends and family. One HTML file; messages travel as ciphertext over public relays and are readable only by people holding the room's invite.">
+<style>
+:root {
+  color-scheme: light;
+  --plane: #f9f9f7;
+  --surface: #fcfcfb;
+  --raised: #ffffff;
+  --ink: #0b0b0b;
+  --ink2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --line: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --shadow: 0 1px 2px rgba(11,11,11,.06), 0 8px 24px rgba(11,11,11,.06);
+  --up: #006300;
+  --up-mark: #0ca30c;
+  --down: #d03b3b;
+  --down-mark: #d03b3b;
+  --warn: #fab219;
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
+  --wash: rgba(42,120,214,.08);
+  --bubble: #eceae4;
+  --bubble-me: #2a78d6;
+  --bubble-me-ink: #ffffff;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --radius: 12px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --plane: #0d0d0d;
+    --surface: #1a1a19;
+    --raised: #232322;
+    --ink: #ffffff;
+    --ink2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --line: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.4);
+    --up: #0ca30c;
+    --up-mark: #0ca30c;
+    --down: #e66767;
+    --down-mark: #e66767;
+    --accent: #3987e5;
+    --wash: rgba(57,135,229,.14);
+    --bubble: #2a2a28;
+    --bubble-me: #2f6fc0;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane: #0d0d0d;
+  --surface: #1a1a19;
+  --raised: #232322;
+  --ink: #ffffff;
+  --ink2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --line: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.4);
+  --up: #0ca30c;
+  --up-mark: #0ca30c;
+  --down: #e66767;
+  --down-mark: #e66767;
+  --accent: #3987e5;
+  --wash: rgba(57,135,229,.14);
+  --bubble: #2a2a28;
+  --bubble-me: #2f6fc0;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--plane);
+  color: var(--ink);
+  font: 14px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+a { color: var(--accent); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 9px; white-space: nowrap;
+}
+.btn:hover { background: var(--wash); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 550; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.icon { width: 34px; padding: 0; justify-content: center; }
+.btn.sm { height: 28px; padding: 0 9px; font-size: 12.5px; }
+.btn.danger:hover { background: rgba(208,59,59,.12); color: var(--down); }
+select, input, textarea {
+  font: inherit; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 9px; height: 34px; padding: 0 9px;
+}
+textarea { height: auto; padding: 7px 9px; resize: none; }
+input::placeholder, textarea::placeholder { color: var(--muted); }
+
+/* ---------- layout ---------- */
+.app {
+  display: grid; grid-template-columns: 300px 1fr;
+  height: 100%; height: 100dvh;
+}
+.side {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--surface); border-right: 1px solid var(--grid);
+}
+.topbar {
+  display: flex; gap: 8px; align-items: center; justify-content: space-between;
+  padding: 14px 14px 10px;
+}
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand .mark {
+  width: 30px; height: 30px; border-radius: 9px; flex: none;
+  background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; font-weight: 700; font-size: 15px;
+}
+.brand h1 { font-size: 16px; white-space: nowrap; }
+.brand .sub { font-size: 12px; color: var(--muted); }
+.controls { display: flex; gap: 6px; align-items: center; }
+
+.me-card {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 14px 10px; padding: 9px 10px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--raised);
+  text-align: left; width: calc(100% - 28px);
+}
+.me-card:hover { background: var(--wash); }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-weight: 600; font-size: 13px; color: #fff;
+}
+.me-card .nm { font-weight: 550; line-height: 1.2; }
+.me-card .fp { font-size: 11.5px; color: var(--muted); }
+
+.side-actions { display: flex; gap: 8px; padding: 0 14px 10px; }
+.side-actions .btn { flex: 1; justify-content: center; }
+
+.rooms { flex: 1; overflow-y: auto; padding: 4px 8px 12px; }
+.room {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 8px; border: 0; background: none; border-radius: 9px; text-align: left;
+}
+.room:hover { background: var(--wash); }
+.room[aria-current="true"] { background: var(--wash); }
+.room .rn { font-weight: 550; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.room .rn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room .rp { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room .body { flex: 1; min-width: 0; }
+.room .rt { font-size: 11px; color: var(--muted); flex: none; }
+.badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 600;
+  display: inline-grid; place-items: center;
+}
+.side-empty { padding: 20px 22px; color: var(--muted); font-size: 13px; }
+.side-empty p { margin: 0 0 8px; }
+
+/* ---------- chat ---------- */
+.chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.chat-inner { display: contents; }
+.chat-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--grid); background: var(--surface);
+}
+.chat-head .title { flex: 1; min-width: 0; }
+.chat-head h2 { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-head .status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--up-mark); flex: none; }
+.dot-live.stale { background: var(--warn); }
+.dot-live.err { background: var(--down-mark); }
+#btn-back { display: none; }
+
+.msgs { flex: 1; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 2px; }
+.day { align-self: center; font-size: 11.5px; color: var(--muted); margin: 12px 0 6px; }
+.sys { align-self: center; font-size: 12px; color: var(--ink2); text-align: center; margin: 4px 0; max-width: 70ch; }
+.sys.warn { color: var(--down); }
+.msg { display: flex; flex-direction: column; align-items: flex-start; max-width: min(78%, 620px); margin-top: 8px; }
+.msg.me { align-self: flex-end; align-items: flex-end; }
+.msg.cont { margin-top: 2px; }
+.msg .who { font-size: 12px; font-weight: 550; margin: 0 0 2px 10px; display: flex; align-items: center; gap: 5px; }
+.msg.me .who { display: none; }
+.msg .bubble {
+  background: var(--bubble); border-radius: 16px; padding: 7px 12px;
+  white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4;
+}
+.msg.me .bubble { background: var(--bubble-me); color: var(--bubble-me-ink); }
+.msg.me .bubble a { color: inherit; }
+.msg .bubble img { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; cursor: zoom-in; }
+.msg .bubble.img { padding: 4px; }
+.msg .meta { font-size: 10.5px; color: var(--muted); margin: 2px 10px 0; display: flex; gap: 5px; }
+.msg .meta .st { cursor: default; }
+.msg .meta .st.failed { color: var(--down); cursor: pointer; text-decoration: underline; }
+.msg.cont .meta { display: none; }
+.msg.cont:hover .meta, .msg.cont:focus-within .meta { display: flex; }
+.older { align-self: center; margin-bottom: 8px; }
+
+.composer {
+  display: flex; align-items: flex-end; gap: 8px;
+  padding: 10px 12px; padding-bottom: max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--grid); background: var(--surface);
+}
+.composer textarea { flex: 1; max-height: 140px; min-height: 34px; }
+.composer .btn { flex: none; }
+
+.chat-empty { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+.chat-empty h3 { font-size: 16px; margin-bottom: 6px; }
+.chat-empty p { color: var(--muted); max-width: 44ch; margin: 0 auto 16px; }
+.chat-empty .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
+.banner {
+  display: flex; gap: 10px; align-items: flex-start;
+  border-left: 3px solid var(--down-mark); background: var(--surface);
+  padding: 9px 14px; font-size: 13px; border-bottom: 1px solid var(--grid);
+}
+.banner.warn { border-left-color: var(--warn); }
+.banner strong { display: block; margin-bottom: 1px; }
+
+/* ---------- dialog ---------- */
+dialog {
+  border: 1px solid var(--border); border-radius: 14px; padding: 0;
+  background: var(--raised); color: var(--ink);
+  width: min(460px, calc(100vw - 32px)); box-shadow: var(--shadow);
+  max-height: calc(100dvh - 32px);
+}
+dialog::backdrop { background: rgba(0,0,0,.42); }
+.dlg-head { padding: 16px 18px 0; }
+.dlg-head h2 { font-size: 15px; }
+.dlg-head p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.dlg-body { padding: 14px 18px; display: grid; gap: 13px; }
+.dlg-foot {
+  display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;
+  padding: 14px 18px; border-top: 1px solid var(--grid); background: var(--surface);
+}
+.dlg-foot .spacer { flex: 1; }
+.field { display: grid; gap: 5px; }
+.field label { font-size: 12.5px; color: var(--ink2); font-weight: 550; }
+.field input, .field select, .field textarea { width: 100%; }
+.field .hint { font-size: 12px; color: var(--muted); }
+.field .err { font-size: 12px; color: var(--down); }
+.note {
+  border: 1px solid var(--border); border-left: 3px solid var(--warn);
+  border-radius: 9px; padding: 9px 12px; font-size: 12.5px; background: var(--surface);
+}
+.linkbox {
+  display: block; width: 100%; padding: 9px 10px; border: 1px solid var(--border);
+  border-radius: 9px; background: var(--surface); font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px; overflow-wrap: anywhere; user-select: all; max-height: 120px; overflow-y: auto;
+}
+.members { display: grid; gap: 6px; }
+.member { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 9px; }
+.member .avatar { width: 26px; height: 26px; font-size: 11px; }
+.member .nm { font-weight: 550; }
+.member .fp { font-size: 11.5px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+.member .you { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.rowbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.relays { display: grid; gap: 6px; }
+.relay { display: flex; align-items: center; gap: 8px; }
+.relay input { flex: 1; }
+#viewer { width: auto; max-width: calc(100vw - 32px); background: transparent; border: 0; box-shadow: none; }
+#viewer img { max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); border-radius: 10px; display: block; }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  .side { border-right: 0; }
+  .chat { display: none; }
+  body.in-room .side { display: none; }
+  body.in-room .chat { display: flex; }
+  #btn-back { display: inline-flex; }
+  .msg { max-width: 86%; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="side">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">🔒</div>
+        <div>
+          <h1>Private Messenger</h1>
+          <div class="sub">End-to-end encrypted</div>
+        </div>
+      </div>
+      <div class="controls">
+        <button class="btn icon" id="btn-theme" title="Switch theme" aria-label="Switch theme">◐</button>
+        <button class="btn icon" id="btn-settings" title="Settings, relays, backup" aria-label="Settings, relays, backup">⚙</button>
+      </div>
+    </header>
+
+    <button class="me-card" id="me-card" title="Your identity">
+      <div class="avatar" id="me-avatar">?</div>
+      <div>
+        <div class="nm" id="me-name">…</div>
+        <div class="fp mono" id="me-fp"></div>
+      </div>
+    </button>
+
+    <div class="side-actions">
+      <button class="btn primary" id="btn-new">+ New room</button>
+      <button class="btn" id="btn-join">Join with link</button>
+    </div>
+
+    <nav class="rooms" id="rooms" aria-label="Rooms"></nav>
+    <div class="side-empty" id="side-empty" hidden>
+      <p><strong>No rooms yet.</strong></p>
+      <p>Create a room and share its invite link with the people you want in it, or paste a link someone sent you.</p>
+    </div>
+  </aside>
+
+  <main class="chat" id="chat">
+    <div class="chat-empty" id="chat-empty">
+      <div>
+        <h3>Pick a room</h3>
+        <p>Every room is a private group. Messages are encrypted on your device with a key only the room's members hold, so the relays that carry them see nothing but ciphertext.</p>
+        <div class="row">
+          <button class="btn primary" id="btn-new-2">+ New room</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="chat-room" class="chat-inner" hidden>
+      <header class="chat-head">
+        <button class="btn icon" id="btn-back" title="Back to rooms" aria-label="Back to rooms">‹</button>
+        <div class="title">
+          <h2 id="room-title"></h2>
+          <div class="status"><span class="dot-live err" id="room-dot"></span><span id="room-status">connecting…</span></div>
+        </div>
+        <button class="btn sm" id="btn-invite">Invite</button>
+        <button class="btn icon" id="btn-room" title="Room details" aria-label="Room details">⋯</button>
+      </header>
+      <div id="banner-slot"></div>
+      <div class="msgs" id="msgs" aria-live="polite"></div>
+      <form class="composer" id="composer" autocomplete="off">
+        <button type="button" class="btn icon" id="btn-photo" title="Send a photo" aria-label="Send a photo">📷</button>
+        <input type="file" id="file-photo" accept="image/*" class="sr">
+        <label class="sr" for="draft">Message</label>
+        <textarea id="draft" rows="1" placeholder="Message…"></textarea>
+        <button type="submit" class="btn primary" id="btn-send">Send</button>
+      </form>
+    </div>
+  </main>
+</div>
+
+<!-- ---------------------------------------------------------------- dialogs -->
+
+<dialog id="dlg-welcome">
+  <div class="dlg-head">
+    <h2>Welcome</h2>
+    <p>Pick the name your friends and family will see. A signing key is generated on this device and never leaves it.</p>
+  </div>
+  <form method="dialog" id="form-welcome">
+    <div class="dlg-body">
+      <div class="field">
+        <label for="welcome-name">Your name</label>
+        <input id="welcome-name" type="text" maxlength="40" autocomplete="nickname" required placeholder="e.g. Marvin">
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button type="submit" class="btn primary">Continue</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-new">
+  <div class="dlg-head">
+    <h2>New room</h2>
+    <p>A room is a private group. You will get an invite link to share with the people who belong in it.</p>
+  </div>
+  <form method="dialog" id="form-new">
+    <div class="dlg-body">
+      <div class="field">
+        <label for="new-name">Room name</label>
+        <input id="new-name" type="text" maxlength="60" required placeholder="e.g. Family">
+        <div class="hint">The name travels inside the invite link, encrypted like everything else.</div>
+      </div>
+      <div class="field">
+        <label for="new-keep">Keep messages on relays for</label>
+        <select id="new-keep">
+          <option value="1">1 day</option>
+          <option value="7">7 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="90">90 days</option>
+          <option value="0">As long as the relays allow</option>
+        </select>
+        <div class="hint">Relays hold ciphertext until every member's devices have fetched it. Copies already on a device stay there.</div>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Create room</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-joinlink">
+  <div class="dlg-head">
+    <h2>Join with a link</h2>
+    <p>Paste the invite link someone sent you.</p>
+  </div>
+  <form method="dialog" id="form-joinlink">
+    <div class="dlg-body">
+      <div class="field">
+        <label for="joinlink-url">Invite link</label>
+        <textarea id="joinlink-url" rows="3" required placeholder="https://…#room=…"></textarea>
+        <div class="err" id="joinlink-err"></div>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Join</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-join">
+  <div class="dlg-head">
+    <h2>Join this room?</h2>
+    <p id="join-desc"></p>
+  </div>
+  <div class="dlg-body">
+    <div class="note">Only join links from people you know. Anyone holding a room's link can read that room.</div>
+  </div>
+  <div class="dlg-foot">
+    <button type="button" class="btn" id="join-no">Ignore</button>
+    <button type="button" class="btn primary" id="join-yes">Join</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-invite">
+  <div class="dlg-head">
+    <h2>Invite to <span id="invite-room"></span></h2>
+    <p>Send this link to the people you want in the room. Hand it over somewhere you already trust, such as in person, by text, or in an existing chat.</p>
+  </div>
+  <div class="dlg-body">
+    <code class="linkbox" id="invite-link"></code>
+    <div class="note"><strong>This link is the room key.</strong> Anyone who has it can read every message in the room, past and future. If it leaks, start a new room and let the old one lapse.</div>
+  </div>
+  <div class="dlg-foot">
+    <button type="button" class="btn" id="btn-share" hidden>Share…</button>
+    <div class="spacer"></div>
+    <button type="button" class="btn" data-close>Close</button>
+    <button type="button" class="btn primary" id="btn-copy-invite">Copy link</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-room">
+  <div class="dlg-head"><h2 id="room-dlg-title">Room</h2></div>
+  <div class="dlg-body">
+    <div class="field">
+      <label for="room-rename">Name on this device</label>
+      <input id="room-rename" type="text" maxlength="60">
+    </div>
+    <div class="field">
+      <label for="room-keep">Keep new messages on relays for</label>
+      <select id="room-keep">
+        <option value="1">1 day</option>
+        <option value="7">7 days</option>
+        <option value="30">30 days</option>
+        <option value="90">90 days</option>
+        <option value="0">As long as the relays allow</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Members seen in this room</label>
+      <div class="members" id="room-members"></div>
+      <div class="hint">Compare fingerprints in person. Two people with the same name but different fingerprints are two different devices, or an impostor.</div>
+    </div>
+    <div class="field">
+      <label>Relays</label>
+      <div class="hint" id="room-relays"></div>
+    </div>
+    <div class="field">
+      <label>Leave</label>
+      <div class="rowbtns">
+        <button type="button" class="btn danger" id="btn-leave">Delete room from this device</button>
+      </div>
+      <div class="hint">Removes the room and its messages here. Other members keep theirs, and the link still works for them.</div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button type="button" class="btn primary" id="btn-room-done">Done</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-settings">
+  <div class="dlg-head"><h2>Settings</h2></div>
+  <div class="dlg-body">
+    <div class="field">
+      <label for="set-name">Your name</label>
+      <input id="set-name" type="text" maxlength="40">
+      <div class="hint">Fingerprint <span class="mono" id="set-fp"></span>. Others see this next to your name and can check it with you in person.</div>
+    </div>
+    <div class="field">
+      <label>Relays</label>
+      <div class="relays" id="relays"></div>
+      <div class="rowbtns">
+        <button type="button" class="btn sm" id="btn-add-relay">+ Add relay</button>
+        <button type="button" class="btn sm" id="btn-default-relays">Restore defaults</button>
+      </div>
+      <div class="hint">Every message is sent to all relays and read from all of them, so any one of them going away costs nothing. Relays see only ciphertext, a per-room address, and timing.</div>
+    </div>
+    <div class="field">
+      <label for="set-notify">Notifications</label>
+      <select id="set-notify">
+        <option value="0">Off</option>
+        <option value="1">When this tab is in the background</option>
+      </select>
+      <div class="hint">Shown by this browser only while the page is open. Notification text is built on this device.</div>
+    </div>
+    <div class="field">
+      <label>Backup</label>
+      <div class="rowbtns">
+        <button type="button" class="btn" id="btn-export">Export encrypted backup</button>
+        <button type="button" class="btn" id="btn-import">Import backup</button>
+        <button type="button" class="btn danger" id="btn-reset">Delete everything</button>
+      </div>
+      <input type="file" id="file-import" accept="application/json,.json" class="sr">
+      <div class="hint" id="import-msg">A backup holds your identity key and room keys, locked with a passphrase. Import it on another device to use the same identity there; messages are fetched again from the relays.</div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button type="button" class="btn primary" id="btn-close-settings">Done</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-pass">
+  <div class="dlg-head"><h2 id="pass-title">Passphrase</h2><p id="pass-desc"></p></div>
+  <form method="dialog" id="form-pass">
+    <div class="dlg-body">
+      <div class="field">
+        <label for="pass-input">Passphrase</label>
+        <input id="pass-input" type="password" minlength="8" required autocomplete="off">
+        <div class="hint" id="pass-hint"></div>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Continue</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="viewer"><img id="viewer-img" alt=""></dialog>
+
+<script>
+"use strict";
+/* Private Messenger
+   One file. Rooms are shared secrets handed around as invite links; every
+   message is encrypted on the device with a key derived from that secret and
+   signed by the sender's own key. Ciphertext travels over public Nostr relays,
+   which act as dumb mailboxes: they store what they are given and hand it to
+   whoever asks for that room's address.
+
+   Sections: helpers · secp256k1 (relay signatures only) · room and identity
+   crypto · store · relay links · messaging · UI · dialogs · boot. */
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+const STORE_KEY = "pm.v1";
+const MSG_PREFIX = "pm.msgs.";
+const DEFAULT_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.primal.net",
+  "wss://relay.nostr.band",
+];
+const KIND = 1059;               // "gift wrap": relays expect random senders and a p tag
+const MAX_LOCAL = 3000;          // messages kept per room on this device
+const MAX_EVENT_BYTES = 60000;   // stay under common relay limits
+const RENDER_STEP = 200;
+
+/* ------------------------------------------------------------- helpers */
+
+const te = new TextEncoder(), td = new TextDecoder();
+const enc = (s) => te.encode(s);
+function hex(bytes) { return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""); }
+function unhex(s) {
+  if (typeof s !== "string" || s.length % 2 || /[^0-9a-f]/i.test(s)) throw new Error("bad hex");
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
+  return out;
+}
+function b64url(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function unb64url(s) {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function concat(...arrs) {
+  const n = arrs.reduce((a, b) => a + b.length, 0);
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
+const sha256 = async (bytes) => new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+const now = () => Date.now();
+const nowSec = () => Math.floor(Date.now() / 1000);
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function linkify(s) {
+  return escapeHtml(s).replace(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)]/g, (u) =>
+    `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+}
+function initials(name) {
+  const p = String(name || "?").trim().split(/\s+/);
+  return ((p[0] || "?")[0] + (p[1] ? p[1][0] : "")).toUpperCase();
+}
+function colorFor(key) {
+  let h = 0;
+  for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `var(--s${(h % 8) + 1})`;
+}
+function fmtTime(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+function fmtDay(ms) {
+  const d = new Date(ms), t = new Date();
+  const sameDay = (a, b) => a.toDateString() === b.toDateString();
+  if (sameDay(d, t)) return "Today";
+  const y = new Date(t); y.setDate(t.getDate() - 1);
+  if (sameDay(d, y)) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: d.getFullYear() === t.getFullYear() ? undefined : "numeric" });
+}
+function fmtRel(ms) {
+  const s = Math.max(0, (now() - ms) / 1000);
+  if (s < 60) return "now";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h";
+  if (s < 7 * 86400) return Math.floor(s / 86400) + "d";
+  return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+/* ------------------------------------------------- secp256k1 / Schnorr
+   Relays only accept events carrying a BIP-340 Schnorr signature, which the
+   browser's WebCrypto cannot produce, so the arithmetic lives here. This key
+   never protects a secret: it is the room's public address on the relays,
+   derived from the room secret, and its only job is to satisfy the relay.
+   Message confidentiality and authenticity come from AES-GCM and ECDSA in
+   WebCrypto below. Not constant-time, and that is acceptable for this use. */
+
+const P = 2n ** 256n - 2n ** 32n - 977n;
+const N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
+const G = [0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798n,
+           0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8n, 1n];
+const modp = (a, m = P) => { const r = a % m; return r >= 0n ? r : r + m; };
+function modinv(a, m = P) {
+  let [r0, r1] = [modp(a, m), m], [s0, s1] = [1n, 0n];
+  while (r1 !== 0n) { const q = r0 / r1; [r0, r1] = [r1, r0 - q * r1]; [s0, s1] = [s1, s0 - q * s1]; }
+  if (r0 !== 1n) throw new Error("no inverse");
+  return modp(s0, m);
+}
+function jDouble([X, Y, Z]) {
+  if (Y === 0n || Z === 0n) return [0n, 1n, 0n];
+  const YY = modp(Y * Y), S = modp(4n * X * YY), M = modp(3n * X * X);
+  const X3 = modp(M * M - 2n * S);
+  return [X3, modp(M * (S - X3) - 8n * YY * YY), modp(2n * Y * Z)];
+}
+function jAdd(A, B) {
+  const [X1, Y1, Z1] = A, [X2, Y2, Z2] = B;
+  if (Z1 === 0n) return B;
+  if (Z2 === 0n) return A;
+  const Z1Z1 = modp(Z1 * Z1), Z2Z2 = modp(Z2 * Z2);
+  const U1 = modp(X1 * Z2Z2), U2 = modp(X2 * Z1Z1);
+  const S1 = modp(Y1 * Z2 * Z2Z2), S2 = modp(Y2 * Z1 * Z1Z1);
+  if (U1 === U2) return S1 === S2 ? jDouble(A) : [0n, 1n, 0n];
+  const H = modp(U2 - U1), R = modp(S2 - S1), HH = modp(H * H), HHH = modp(H * HH);
+  const X3 = modp(R * R - HHH - 2n * U1 * HH);
+  return [X3, modp(R * (U1 * HH - X3) - S1 * HHH), modp(H * Z1 * Z2)];
+}
+function jMul(k, Pt) {
+  let R = [0n, 1n, 0n], Q = Pt;
+  k = modp(k, N);
+  while (k > 0n) {
+    if (k & 1n) R = jAdd(R, Q);
+    Q = jDouble(Q);
+    k >>= 1n;
+  }
+  return R;
+}
+function toAffine([X, Y, Z]) {
+  if (Z === 0n) throw new Error("point at infinity");
+  const zi = modinv(Z), zi2 = modp(zi * zi);
+  return [modp(X * zi2), modp(Y * zi2 * zi)];
+}
+const bigToBytes = (b) => unhex(b.toString(16).padStart(64, "0"));
+const bytesToBig = (u) => BigInt("0x" + hex(u));
+function pubkeyOf(sk) { return toAffine(jMul(sk, G)); }
+const pubkeyHex = (sk) => hex(bigToBytes(pubkeyOf(sk)[0]));
+
+const tagCache = new Map();
+async function taggedHash(tag, ...parts) {
+  if (!tagCache.has(tag)) tagCache.set(tag, await sha256(enc(tag)));
+  const t = tagCache.get(tag);
+  return sha256(concat(t, t, ...parts));
+}
+async function schnorrSign(sk, msg32, aux = randomBytes(32)) {
+  const [px, py] = pubkeyOf(sk);
+  const d = (py & 1n) === 0n ? sk : N - sk;
+  const t = bigToBytes(d ^ bytesToBig(await taggedHash("BIP0340/aux", aux)));
+  const k0 = modp(bytesToBig(await taggedHash("BIP0340/nonce", t, bigToBytes(px), msg32)), N);
+  if (k0 === 0n) throw new Error("bad nonce");
+  const [rx, ry] = toAffine(jMul(k0, G));
+  const k = (ry & 1n) === 0n ? k0 : N - k0;
+  const e = modp(bytesToBig(await taggedHash("BIP0340/challenge", bigToBytes(rx), bigToBytes(px), msg32)), N);
+  return concat(bigToBytes(rx), bigToBytes(modp(k + e * d, N)));
+}
+async function finishEvent(sk, ev) {
+  ev.pubkey = pubkeyHex(sk);
+  const idBytes = await sha256(enc(JSON.stringify([0, ev.pubkey, ev.created_at, ev.kind, ev.tags, ev.content])));
+  ev.id = hex(idBytes);
+  ev.sig = hex(await schnorrSign(sk, idBytes));
+  return ev;
+}
+
+/* ---------------------------------------------------- identity & rooms */
+
+const ECDSA = { name: "ECDSA", namedCurve: "P-256" };
+const SIGN = { name: "ECDSA", hash: "SHA-256" };
+
+async function newIdentity(name) {
+  const kp = await crypto.subtle.generateKey(ECDSA, true, ["sign", "verify"]);
+  const pubRaw = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
+  return {
+    name,
+    pub: hex(pubRaw),
+    priv: await crypto.subtle.exportKey("jwk", kp.privateKey),
+    fp: await fingerprint(pubRaw),
+  };
+}
+async function fingerprint(pubRaw) {
+  const h = hex(await sha256(pubRaw)).slice(0, 20);
+  return h.match(/.{4}/g).join(" ");
+}
+let privKey = null;
+async function loadPrivKey() {
+  privKey = await crypto.subtle.importKey("jwk", state.me.priv, ECDSA, false, ["sign"]);
+}
+const pubCache = new Map();
+async function importPub(pubHex) {
+  if (!pubCache.has(pubHex)) {
+    pubCache.set(pubHex, crypto.subtle.importKey("raw", unhex(pubHex), ECDSA, false, ["verify"]));
+  }
+  return pubCache.get(pubHex);
+}
+function signingInput(m) {
+  // fixed-width fields first, free text last, so no two messages share a string
+  return enc([m.v, m.id, m.ts, m.room, m.pub, m.type, m.body].join("\n"));
+}
+
+const roomKeys = new Map();      // roomId -> { encKey, sk, pub }
+async function deriveRoom(secretB64) {
+  const secret = unb64url(secretB64);
+  if (secret.length !== 32) throw new Error("bad secret");
+  const km = await crypto.subtle.importKey("raw", secret, "HKDF", false, ["deriveBits", "deriveKey"]);
+  const hk = (info) => ({ name: "HKDF", hash: "SHA-256", salt: enc("private-messenger/room/v1"), info: enc(info) });
+  const encKey = await crypto.subtle.deriveKey(hk("message-encryption"), km, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  const skBytes = new Uint8Array(await crypto.subtle.deriveBits(hk("relay-address"), km, 256));
+  let sk = modp(bytesToBig(skBytes), N);
+  if (sk === 0n) sk = 1n;
+  return { encKey, sk, pub: pubkeyHex(sk) };
+}
+async function roomKeysFor(room) {
+  if (!roomKeys.has(room.id)) roomKeys.set(room.id, await deriveRoom(room.secret));
+  return roomKeys.get(room.id);
+}
+async function encryptForRoom(keys, plaintext) {
+  const iv = randomBytes(12);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: unhex(keys.pub) }, keys.encKey, enc(plaintext)));
+  return b64url(concat(iv, ct));
+}
+async function decryptForRoom(keys, content) {
+  const buf = unb64url(content);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf.subarray(0, 12), additionalData: unhex(keys.pub) }, keys.encKey, buf.subarray(12));
+  return td.decode(pt);
+}
+
+/* ------------------------------------------------------------- store */
+
+let state = load();
+function load() {
+  const base = { me: null, relays: DEFAULT_RELAYS.slice(), rooms: {}, order: [], active: null, theme: "auto", notify: 0, contacts: {} };
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) Object.assign(base, JSON.parse(raw));
+  } catch (e) { console.warn("could not read saved state", e); }
+  if (!Array.isArray(base.relays) || !base.relays.length) base.relays = DEFAULT_RELAYS.slice();
+  base.order = base.order.filter((id) => base.rooms[id]);
+  for (const id of Object.keys(base.rooms)) if (!base.order.includes(id)) base.order.push(id);
+  return base;
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+  catch (e) { console.warn("could not save", e); }
+}
+const msgCache = new Map();
+function msgsOf(roomId) {
+  if (!msgCache.has(roomId)) {
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(MSG_PREFIX + roomId) || "[]"); } catch (e) { list = []; }
+    msgCache.set(roomId, list);
+  }
+  return msgCache.get(roomId);
+}
+function saveMsgs(roomId) {
+  const list = msgsOf(roomId);
+  if (list.length > MAX_LOCAL) list.splice(0, list.length - MAX_LOCAL);
+  try { localStorage.setItem(MSG_PREFIX + roomId, JSON.stringify(list)); }
+  catch (e) { console.warn("could not save messages", e); }
+}
+function forgetMsgs(roomId) {
+  msgCache.delete(roomId);
+  localStorage.removeItem(MSG_PREFIX + roomId);
+}
+
+/* --------------------------------------------------------- relay links
+   One socket per room per relay. Each room authenticates to a relay with its
+   own address key (NIP-42) when asked, which a shared socket could not do. */
+
+class Link {
+  constructor(net, url) {
+    this.net = net; this.url = url; this.ws = null;
+    this.state = "closed"; this.attempt = 0; this.timer = null;
+    this.eose = false; this.closedByUs = false;
+    this.open();
+  }
+  open() {
+    if (this.closedByUs) return;
+    clearTimeout(this.timer);
+    let ws;
+    try { ws = new WebSocket(this.url); }
+    catch (e) { this.fail(); return; }
+    this.ws = ws; this.state = "connecting"; this.eose = false;
+    ws.onopen = () => {
+      this.state = "open"; this.attempt = 0;
+      this.subscribe();
+      this.net.flush(this);
+      this.net.changed();
+    };
+    ws.onmessage = (m) => this.onMessage(m.data);
+    ws.onclose = () => { if (this.ws === ws) this.fail(); };
+    ws.onerror = () => {};
+  }
+  fail() {
+    this.ws = null; this.state = "closed"; this.eose = false;
+    this.net.changed();
+    if (this.closedByUs) return;
+    const wait = Math.min(60000, 1000 * 2 ** Math.min(this.attempt++, 6)) * (0.7 + Math.random() * 0.6);
+    this.timer = setTimeout(() => this.open(), wait);
+  }
+  send(arr) {
+    if (this.state !== "open") return false;
+    try { this.ws.send(JSON.stringify(arr)); return true; } catch (e) { return false; }
+  }
+  subscribe() {
+    const room = this.net.room;
+    const filter = { kinds: [KIND], "#p": [this.net.keys.pub] };
+    if (room.lastSeen) filter.since = room.lastSeen - 3600;   // an hour of overlap for clock skew
+    else filter.limit = 500;
+    this.send(["REQ", "room", filter]);
+  }
+  async onMessage(raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(msg)) return;
+    const [type] = msg;
+    if (type === "EVENT" && msg[1] === "room") {
+      this.net.onEvent(msg[2], this);
+    } else if (type === "EOSE") {
+      this.eose = true; this.net.changed();
+    } else if (type === "OK") {
+      this.net.onOk(msg[1], msg[2], msg[3], this);
+    } else if (type === "AUTH" && typeof msg[1] === "string") {
+      const ev = await finishEvent(this.net.keys.sk, {
+        kind: 22242, created_at: nowSec(), content: "",
+        tags: [["relay", this.url], ["challenge", msg[1]]],
+      });
+      this.send(["AUTH", ev]);
+      // relays that require auth drop the subscription that came before it
+      setTimeout(() => this.subscribe(), 300);
+    } else if (type === "CLOSED" && msg[1] === "room") {
+      if (/auth/i.test(msg[2] || "")) setTimeout(() => this.subscribe(), 1000);
+    } else if (type === "NOTICE") {
+      console.info(this.url, msg[1]);
+    }
+  }
+  close() {
+    this.closedByUs = true;
+    clearTimeout(this.timer);
+    if (this.ws) { try { this.ws.close(); } catch (e) {} }
+    this.ws = null; this.state = "closed";
+  }
+}
+
+class RoomNet {
+  constructor(room, keys) {
+    this.room = room; this.keys = keys;
+    this.links = state.relays.map((url) => new Link(this, url));
+    this.outbox = new Map();    // event id -> { ev, acks:Set, msgId }
+  }
+  get open() { return this.links.filter((l) => l.state === "open").length; }
+  get synced() { return this.links.some((l) => l.eose); }
+  changed() { if (state.active === this.room.id) renderStatus(); }
+  publish(ev, msgId) {
+    const entry = { ev, acks: new Set(), nacks: new Set(), msgId, at: now() };
+    this.outbox.set(ev.id, entry);
+    for (const l of this.links) l.send(["EVENT", ev]);
+    setTimeout(() => this.settle(ev.id), 12000);
+  }
+  flush(link) {
+    for (const { ev } of this.outbox.values()) link.send(["EVENT", ev]);
+  }
+  onOk(id, ok, reason, link) {
+    const e = this.outbox.get(id);
+    if (!e) return;
+    (ok ? e.acks : e.nacks).add(link.url);
+    if (!ok) console.warn(link.url, "rejected", reason);
+    if (e.acks.size) this.markSent(e, "sent");
+  }
+  settle(id) {
+    const e = this.outbox.get(id);
+    if (!e) return;
+    if (e.acks.size) { this.markSent(e, "sent"); this.outbox.delete(id); }
+    else if (e.nacks.size >= this.links.length) { this.markSent(e, "failed"); this.outbox.delete(id); }
+    else if (now() - e.at > 90000) { this.markSent(e, "failed"); this.outbox.delete(id); }
+    else setTimeout(() => this.settle(id), 12000);
+  }
+  markSent(e, status) {
+    const m = msgsOf(this.room.id).find((x) => x.id === e.msgId);
+    if (m && m.status !== status) {
+      m.status = status; m.acks = e.acks.size;
+      saveMsgs(this.room.id);
+      if (state.active === this.room.id) renderMsgs({ keepScroll: true });
+    }
+  }
+  async onEvent(ev) {
+    if (!ev || ev.kind !== KIND || typeof ev.content !== "string") return;
+    if (this.outbox.has(ev.id)) return;   // our own, echoed back
+    const list = msgsOf(this.room.id);
+    if (seenEvents.has(ev.id)) return;
+    seenEvents.add(ev.id);
+    if (list.some((m) => m.evId === ev.id)) return;
+    try { await receive(this.room, this.keys, ev); }
+    catch (e) { console.warn("dropped an event", e.message); }
+    if (ev.created_at > (this.room.lastSeen || 0)) { this.room.lastSeen = ev.created_at; save(); }
+  }
+  close() { for (const l of this.links) l.close(); }
+}
+const seenEvents = new Set();
+const nets = new Map();
+async function connectRoom(room) {
+  if (nets.has(room.id)) return nets.get(room.id);
+  const keys = await roomKeysFor(room);
+  const net = new RoomNet(room, keys);
+  nets.set(room.id, net);
+  return net;
+}
+function reconnectAll() {
+  for (const net of nets.values()) net.close();
+  nets.clear();
+  for (const id of state.order) connectRoom(state.rooms[id]);
+}
+
+/* ----------------------------------------------------------- messaging */
+
+async function send(room, type, body) {
+  const keys = await roomKeysFor(room);
+  const m = {
+    v: 1, id: hex(randomBytes(12)), ts: now(), room: keys.pub,
+    pub: state.me.pub, name: state.me.name, type, body,
+  };
+  m.sig = b64url(new Uint8Array(await crypto.subtle.sign(SIGN, privKey, signingInput(m))));
+  const content = await encryptForRoom(keys, JSON.stringify(m));
+  const tags = [["p", keys.pub]];
+  if (room.keep > 0) tags.push(["expiration", String(nowSec() + room.keep * 86400)]);
+  const ev = await finishEvent(bytesToBig(randomBytes(32)) % N || 1n, { kind: KIND, created_at: nowSec(), tags, content });
+  if (JSON.stringify(ev).length > MAX_EVENT_BYTES) throw new Error("too large");
+  const local = { id: m.id, evId: ev.id, ts: m.ts, pub: m.pub, name: m.name, type, body, mine: true, status: "pending", acks: 0 };
+  msgsOf(room.id).push(local);
+  saveMsgs(room.id);
+  if (type !== "join") { room.last = preview(local); room.lastTs = m.ts; }
+  save();
+  (await connectRoom(room)).publish(ev, m.id);
+  return local;
+}
+async function receive(room, keys, ev) {
+  const m = JSON.parse(await decryptForRoom(keys, ev.content));
+  if (m.v !== 1 || m.room !== keys.pub) throw new Error("wrong room");
+  for (const f of ["id", "pub", "name", "type", "body", "sig"]) if (typeof m[f] !== "string") throw new Error("bad field " + f);
+  if (typeof m.ts !== "number" || /\n/.test(m.id + m.pub + m.name + m.type)) throw new Error("bad shape");
+  if (!["text", "image", "join"].includes(m.type)) throw new Error("unknown type");
+  const ok = await crypto.subtle.verify(SIGN, await importPub(m.pub), unb64url(m.sig), signingInput(m));
+  if (!ok) throw new Error("bad signature");
+  const list = msgsOf(room.id);
+  if (list.some((x) => x.id === m.id)) return;
+  const mine = m.pub === state.me.pub;
+  const name = m.name.trim().slice(0, 40) || "Someone";
+  const local = { id: m.id, evId: ev.id, ts: m.ts, pub: m.pub, name, type: m.type, body: m.body, mine, status: "sent" };
+  const c = state.contacts[m.pub];
+  if (!c) {
+    const clash = Object.entries(state.contacts).find(([pub, x]) => pub !== m.pub && x.name.toLowerCase() === name.toLowerCase());
+    state.contacts[m.pub] = { name, firstSeen: now() };
+    if (clash) local.flag = "A second device or a different person is using the name " + name + ". Check fingerprints in person.";
+  } else if (c.name !== name) {
+    local.was = c.name; c.name = name;
+  }
+  if (!(room.members || (room.members = [])).includes(m.pub)) room.members.push(m.pub);
+  list.push(local);
+  list.sort((a, b) => a.ts - b.ts);
+  saveMsgs(room.id);
+  if (m.ts > (room.lastTs || 0) && m.type !== "join") { room.last = preview(local); room.lastTs = m.ts; }
+  if (!mine && state.active !== room.id) room.unread = (room.unread || 0) + 1;
+  if (!mine && m.type !== "join") notify(room, local);
+  save();
+  renderRooms();
+  if (state.active === room.id) renderMsgs({ append: true });
+}
+function preview(m) {
+  if (m.type === "image") return (m.mine ? "You" : m.name) + ": 📷 Photo";
+  if (m.type === "join") return m.name + " joined";
+  return (m.mine ? "You: " : m.name + ": ") + m.body.replace(/\s+/g, " ").slice(0, 80);
+}
+function notify(room, m) {
+  if (!state.notify || document.visibilityState === "visible") return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    const n = new Notification(room.name, { body: m.type === "image" ? m.name + " sent a photo" : m.name + ": " + m.body.slice(0, 120), tag: room.id });
+    n.onclick = () => { window.focus(); openRoom(room.id); n.close(); };
+  } catch (e) {}
+}
+
+/* ---------------------------------------------------------------- UI */
+
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", state.theme);
+  $("#btn-theme").title = "Theme: " + state.theme + " — click to change";
+}
+function renderMe() {
+  if (!state.me) return;
+  $("#me-name").textContent = state.me.name;
+  $("#me-fp").textContent = state.me.fp;
+  const av = $("#me-avatar");
+  av.textContent = initials(state.me.name);
+  av.style.background = colorFor(state.me.pub);
+}
+function renderRooms() {
+  const nav = $("#rooms");
+  const ids = state.order.slice().sort((a, b) => (state.rooms[b].lastTs || state.rooms[b].createdAt || 0) - (state.rooms[a].lastTs || state.rooms[a].createdAt || 0));
+  nav.innerHTML = ids.map((id) => {
+    const r = state.rooms[id];
+    return `<button class="room" data-id="${id}" aria-current="${state.active === id}">
+      <div class="avatar" style="background:${colorFor(id)}">${escapeHtml(initials(r.name))}</div>
+      <div class="body">
+        <div class="rn"><span>${escapeHtml(r.name)}</span>${r.unread ? `<span class="badge">${r.unread}</span>` : ""}</div>
+        <div class="rp">${escapeHtml(r.last || "No messages yet")}</div>
+      </div>
+      <div class="rt">${r.lastTs ? fmtRel(r.lastTs) : ""}</div>
+    </button>`;
+  }).join("");
+  $("#side-empty").hidden = ids.length > 0;
+}
+$("#rooms").addEventListener("click", (e) => {
+  const b = e.target.closest(".room");
+  if (b) openRoom(b.dataset.id);
+});
+
+let renderLimit = RENDER_STEP;
+function openRoom(id) {
+  const room = state.rooms[id];
+  if (!room) { state.active = null; save(); renderChat(); return; }
+  state.active = id; room.unread = 0; save();
+  renderLimit = RENDER_STEP;
+  document.body.classList.add("in-room");
+  connectRoom(room);
+  renderRooms();
+  renderChat();
+  if (matchMedia("(pointer: fine)").matches) $("#draft").focus();
+}
+function closeRoom() {
+  state.active = null; save();
+  document.body.classList.remove("in-room");
+  renderRooms(); renderChat();
+}
+function renderChat() {
+  const room = state.rooms[state.active];
+  $("#chat-empty").hidden = !!room;
+  $("#chat-room").hidden = !room;
+  if (!room) return;
+  $("#room-title").textContent = room.name;
+  renderStatus();
+  renderMsgs({ scrollBottom: true });
+}
+function renderStatus() {
+  const room = state.rooms[state.active];
+  if (!room) return;
+  const net = nets.get(room.id);
+  const dot = $("#room-dot"), txt = $("#room-status");
+  const total = state.relays.length;
+  const open = net ? net.open : 0;
+  const members = (room.members || []).filter((p) => p !== state.me.pub).length;
+  const who = members ? ` · ${members} other${members === 1 ? "" : "s"} seen` : " · nobody else yet";
+  if (!open) { dot.className = "dot-live err"; txt.textContent = `offline — ${total} relay${total === 1 ? "" : "s"} unreachable` + who; }
+  else if (!net.synced) { dot.className = "dot-live stale"; txt.textContent = `syncing · ${open}/${total} relays` + who; }
+  else { dot.className = "dot-live"; txt.textContent = `${open}/${total} relays` + who; }
+  const slot = $("#banner-slot");
+  slot.innerHTML = open ? "" : `<div class="banner warn"><div><strong>No relay reachable.</strong>Messages you send will go out as soon as one connects. Check the relay list in Settings.</div></div>`;
+}
+function renderMsgs({ scrollBottom = false, append = false, keepScroll = false } = {}) {
+  const room = state.rooms[state.active];
+  if (!room) return;
+  const box = $("#msgs");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  const list = msgsOf(room.id);
+  const start = Math.max(0, list.length - renderLimit);
+  const parts = [];
+  if (start > 0) parts.push(`<button class="btn sm older" id="btn-older">Show earlier messages (${start})</button>`);
+  let lastDay = "", lastPub = null, lastTs = 0;
+  for (let i = start; i < list.length; i++) {
+    const m = list[i];
+    const day = fmtDay(m.ts);
+    if (day !== lastDay) { parts.push(`<div class="day">${day}</div>`); lastDay = day; lastPub = null; }
+    if (m.type === "join") {
+      parts.push(`<div class="sys">${escapeHtml(m.name)} joined${m.was ? " (was " + escapeHtml(m.was) + ")" : ""}</div>`);
+      if (m.flag) parts.push(`<div class="sys warn">⚠ ${escapeHtml(m.flag)}</div>`);
+      lastPub = null;
+      continue;
+    }
+    if (m.flag) parts.push(`<div class="sys warn">⚠ ${escapeHtml(m.flag)}</div>`);
+    const cont = lastPub === m.pub && m.ts - lastTs < 5 * 60000;
+    const body = m.type === "image"
+      ? `<div class="bubble img"><img src="${escapeHtml(m.body)}" alt="Photo from ${escapeHtml(m.name)}" data-view></div>`
+      : `<div class="bubble">${linkify(m.body)}</div>`;
+    let st = "";
+    if (m.mine) {
+      if (m.status === "pending") st = `<span class="st" title="Waiting for a relay to accept it">sending…</span>`;
+      else if (m.status === "failed") st = `<span class="st failed" data-retry="${m.id}" title="No relay accepted it. Click to try again">not sent — retry</span>`;
+      else st = `<span class="st" title="Accepted by ${m.acks || 1} relay${m.acks === 1 ? "" : "s"}">✓</span>`;
+    }
+    parts.push(`<div class="msg${m.mine ? " me" : ""}${cont ? " cont" : ""}">
+      ${cont || m.mine ? "" : `<div class="who" style="color:${colorFor(m.pub)}">${escapeHtml(m.name)}${m.was ? `<span class="muted">(was ${escapeHtml(m.was)})</span>` : ""}</div>`}
+      ${body}
+      <div class="meta"><span>${fmtTime(m.ts)}</span>${st}</div>
+    </div>`);
+    lastPub = m.pub; lastTs = m.ts;
+  }
+  const prevTop = box.scrollTop;
+  box.innerHTML = parts.join("");
+  if (scrollBottom || (append && atBottom)) box.scrollTop = box.scrollHeight;
+  else if (keepScroll) box.scrollTop = prevTop;
+  const older = $("#btn-older");
+  if (older) older.addEventListener("click", () => {
+    renderLimit += RENDER_STEP;
+    const h = box.scrollHeight;
+    renderMsgs();
+    box.scrollTop = box.scrollHeight - h + box.scrollTop;
+  });
+}
+$("#msgs").addEventListener("click", (e) => {
+  const img = e.target.closest("img[data-view]");
+  if (img) { $("#viewer-img").src = img.src; $("#viewer").showModal(); return; }
+  const retry = e.target.closest("[data-retry]");
+  if (retry) resend(retry.dataset.retry);
+});
+$("#viewer").addEventListener("click", () => $("#viewer").close());
+
+async function resend(msgId) {
+  const room = state.rooms[state.active];
+  const list = msgsOf(room.id);
+  const i = list.findIndex((m) => m.id === msgId);
+  if (i < 0) return;
+  const [old] = list.splice(i, 1);
+  saveMsgs(room.id);
+  await send(room, old.type, old.body);
+  renderMsgs({ keepScroll: true });
+}
+
+/* composer */
+const draft = $("#draft");
+function autosize() { draft.style.height = "auto"; draft.style.height = Math.min(140, draft.scrollHeight) + "px"; }
+draft.addEventListener("input", autosize);
+draft.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && matchMedia("(pointer: fine)").matches) { e.preventDefault(); $("#composer").requestSubmit(); }
+});
+$("#composer").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const room = state.rooms[state.active];
+  const text = draft.value.trim();
+  if (!room || !text) return;
+  draft.value = ""; autosize();
+  try {
+    await send(room, "text", text);
+    renderRooms(); renderMsgs({ scrollBottom: true });
+  } catch (err) {
+    draft.value = text;
+    alert(err.message === "too large" ? "That message is too long for the relays. Split it up." : "Could not send: " + err.message);
+  }
+});
+$("#btn-photo").addEventListener("click", () => $("#file-photo").click());
+$("#file-photo").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  const room = state.rooms[state.active];
+  if (!file || !room) return;
+  try {
+    const dataUrl = await shrinkImage(file);
+    await send(room, "image", dataUrl);
+    renderRooms(); renderMsgs({ scrollBottom: true });
+  } catch (err) { alert("Could not send that photo: " + err.message); }
+});
+async function shrinkImage(file) {
+  const bmp = await createImageBitmap(file).catch(() => { throw new Error("not an image this browser can read"); });
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  for (const maxSide of [1024, 800, 640, 480, 360]) {
+    const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    canvas.width = Math.max(1, Math.round(bmp.width * s));
+    canvas.height = Math.max(1, Math.round(bmp.height * s));
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    for (const q of [0.8, 0.65, 0.5, 0.4]) {
+      const url = canvas.toDataURL("image/jpeg", q);
+      if (url.length < MAX_EVENT_BYTES * 0.7) return url;   // room for the envelope
+    }
+  }
+  throw new Error("could not make it small enough");
+}
+
+/* ------------------------------------------------------------ dialogs */
+
+$$("dialog [data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
+$("#btn-theme").addEventListener("click", () => {
+  const order = ["auto", "light", "dark"];
+  state.theme = order[(order.indexOf(state.theme) + 1) % order.length];
+  applyTheme(); save();
+});
+$("#btn-back").addEventListener("click", closeRoom);
+
+/* new room */
+const openNew = () => { $("#new-name").value = ""; $("#dlg-new").showModal(); $("#new-name").focus(); };
+$("#btn-new").addEventListener("click", openNew);
+$("#btn-new-2").addEventListener("click", openNew);
+$("#form-new").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("#new-name").value.trim();
+  if (!name) return;
+  $("#dlg-new").close();
+  const room = await addRoom({ name, secret: b64url(randomBytes(32)), keep: parseInt($("#new-keep").value, 10) });
+  openRoom(room.id);
+  openInvite();
+});
+async function addRoom({ name, secret, keep = 30 }) {
+  const keys = await deriveRoom(secret);
+  if (state.rooms[keys.pub]) return state.rooms[keys.pub];
+  const room = { id: keys.pub, name, secret, keep, createdAt: now(), members: [state.me.pub], lastSeen: 0, unread: 0 };
+  state.rooms[room.id] = room;
+  state.order.push(room.id);
+  save();
+  renderRooms();
+  await connectRoom(room);
+  send(room, "join", "").catch(() => {});
+  return room;
+}
+
+/* invite */
+function inviteLink(room) {
+  const base = location.href.split("#")[0];
+  return base + "#room=" + b64url(enc(JSON.stringify({ v: 1, n: room.name, s: room.secret, k: room.keep })));
+}
+function openInvite() {
+  const room = state.rooms[state.active];
+  if (!room) return;
+  $("#invite-room").textContent = room.name;
+  $("#invite-link").textContent = inviteLink(room);
+  $("#btn-share").hidden = !navigator.share;
+  $("#dlg-invite").showModal();
+}
+$("#btn-invite").addEventListener("click", openInvite);
+$("#btn-copy-invite").addEventListener("click", async (e) => {
+  const link = $("#invite-link").textContent;
+  try { await navigator.clipboard.writeText(link); e.target.textContent = "Copied"; }
+  catch (err) {
+    const r = document.createRange(); r.selectNodeContents($("#invite-link"));
+    getSelection().removeAllRanges(); getSelection().addRange(r);
+    e.target.textContent = "Select and copy";
+  }
+  setTimeout(() => (e.target.textContent = "Copy link"), 1500);
+});
+$("#btn-share").addEventListener("click", () => {
+  const room = state.rooms[state.active];
+  navigator.share({ title: "Join " + room.name, text: "Invite to our private room", url: inviteLink(room) }).catch(() => {});
+});
+
+/* join via link */
+function parseInvite(url) {
+  const m = String(url).match(/#room=([A-Za-z0-9_-]+)/);
+  if (!m) throw new Error("That is not an invite link.");
+  const inv = JSON.parse(td.decode(unb64url(m[1])));
+  if (inv.v !== 1 || typeof inv.n !== "string" || typeof inv.s !== "string" || unb64url(inv.s).length !== 32) throw new Error("This link is damaged.");
+  return { name: inv.n.trim().slice(0, 60) || "Room", secret: inv.s, keep: [1, 7, 30, 90, 0].includes(inv.k) ? inv.k : 30 };
+}
+let pendingInvite = null;
+function offerJoin(inv) {
+  pendingInvite = inv;
+  $("#join-desc").textContent = `You were invited to “${inv.name}”.`;
+  $("#dlg-join").showModal();
+}
+$("#join-no").addEventListener("click", () => { pendingInvite = null; $("#dlg-join").close(); });
+$("#join-yes").addEventListener("click", async () => {
+  $("#dlg-join").close();
+  if (!pendingInvite) return;
+  const room = await addRoom(pendingInvite);
+  pendingInvite = null;
+  openRoom(room.id);
+});
+function checkHash() {
+  if (!/#room=/.test(location.hash)) return;
+  let inv = null;
+  try { inv = parseInvite(location.href); } catch (e) { alert(e.message); }
+  history.replaceState(null, "", location.pathname + location.search);
+  if (!inv) return;
+  if (!state.me) { pendingInvite = inv; return; }
+  offerJoin(inv);
+}
+window.addEventListener("hashchange", checkHash);
+$("#btn-join").addEventListener("click", () => { $("#joinlink-url").value = ""; $("#joinlink-err").textContent = ""; $("#dlg-joinlink").showModal(); });
+$("#form-joinlink").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const inv = parseInvite($("#joinlink-url").value.trim());
+    $("#dlg-joinlink").close();
+    const room = await addRoom(inv);
+    openRoom(room.id);
+  } catch (err) { $("#joinlink-err").textContent = err.message; }
+});
+
+/* room details */
+$("#btn-room").addEventListener("click", () => {
+  const room = state.rooms[state.active];
+  if (!room) return;
+  $("#room-dlg-title").textContent = room.name;
+  $("#room-rename").value = room.name;
+  $("#room-keep").value = String(room.keep);
+  const members = (room.members || []).map((pub) => {
+    const c = pub === state.me.pub ? { name: state.me.name } : state.contacts[pub] || { name: "Unknown" };
+    return { pub, name: c.name };
+  });
+  $("#room-members").innerHTML = members.map((m) => `<div class="member">
+    <div class="avatar" style="background:${colorFor(m.pub)}">${escapeHtml(initials(m.name))}</div>
+    <div><div class="nm">${escapeHtml(m.name)}</div><div class="fp" data-fp="${m.pub}">…</div></div>
+    ${m.pub === state.me.pub ? `<span class="you">you</span>` : ""}
+  </div>`).join("") || `<div class="hint">Nobody has posted yet.</div>`;
+  $$("[data-fp]").forEach(async (el) => { el.textContent = await fingerprint(unhex(el.dataset.fp)); });
+  const net = nets.get(room.id);
+  $("#room-relays").textContent = net ? net.links.map((l) => `${l.url.replace(/^wss?:\/\//, "")} (${l.state})`).join(" · ") : "not connected";
+  $("#dlg-room").showModal();
+});
+$("#btn-room-done").addEventListener("click", () => {
+  const room = state.rooms[state.active];
+  const name = $("#room-rename").value.trim();
+  if (name) room.name = name;
+  room.keep = parseInt($("#room-keep").value, 10) || 0;
+  save(); renderRooms(); renderChat();
+  $("#dlg-room").close();
+});
+$("#btn-leave").addEventListener("click", () => {
+  const room = state.rooms[state.active];
+  if (!confirm(`Delete “${room.name}” and its messages from this device?`)) return;
+  $("#dlg-room").close();
+  const net = nets.get(room.id);
+  if (net) net.close();
+  nets.delete(room.id);
+  forgetMsgs(room.id);
+  delete state.rooms[room.id];
+  state.order = state.order.filter((id) => id !== room.id);
+  closeRoom();
+});
+
+/* settings */
+const settings = $("#dlg-settings");
+function renderRelays() {
+  $("#relays").innerHTML = state.relays.map((url, i) => `<div class="relay">
+    <input type="url" value="${escapeHtml(url)}" data-i="${i}" placeholder="wss://…" spellcheck="false">
+    <button type="button" class="btn icon sm" data-del="${i}" title="Remove relay" aria-label="Remove relay">✕</button>
+  </div>`).join("");
+}
+$("#btn-settings").addEventListener("click", () => {
+  $("#set-name").value = state.me.name;
+  $("#set-fp").textContent = state.me.fp;
+  $("#set-notify").value = String(state.notify);
+  $("#import-msg").textContent = "A backup holds your identity key and room keys, locked with a passphrase. Import it on another device to use the same identity there; messages are fetched again from the relays.";
+  renderRelays();
+  settings.showModal();
+});
+$("#me-card").addEventListener("click", () => $("#btn-settings").click());
+$("#relays").addEventListener("click", (e) => {
+  const d = e.target.closest("[data-del]");
+  if (!d) return;
+  state.relays.splice(parseInt(d.dataset.del, 10), 1);
+  renderRelays();
+});
+$("#relays").addEventListener("change", (e) => {
+  const i = parseInt(e.target.dataset.i, 10);
+  if (Number.isNaN(i)) return;
+  const v = e.target.value.trim();
+  if (/^wss?:\/\/\S+$/.test(v)) state.relays[i] = v; else renderRelays();
+});
+$("#btn-add-relay").addEventListener("click", () => { state.relays.push(""); renderRelays(); $$("#relays input").pop().focus(); });
+$("#btn-default-relays").addEventListener("click", () => { state.relays = DEFAULT_RELAYS.slice(); renderRelays(); });
+$("#set-notify").addEventListener("change", async (e) => {
+  state.notify = parseInt(e.target.value, 10) || 0;
+  if (state.notify && typeof Notification !== "undefined" && Notification.permission === "default") {
+    if ((await Notification.requestPermission()) !== "granted") { state.notify = 0; e.target.value = "0"; }
+  }
+  save();
+});
+$("#btn-close-settings").addEventListener("click", () => {
+  const name = $("#set-name").value.trim().slice(0, 40);
+  if (name && name !== state.me.name) { state.me.name = name; renderMe(); }
+  const before = JSON.stringify(state.relays);
+  state.relays = state.relays.map((u) => u.trim()).filter((u) => /^wss?:\/\/\S+$/.test(u));
+  if (!state.relays.length) state.relays = DEFAULT_RELAYS.slice();
+  save();
+  settings.close();
+  if (JSON.stringify(state.relays) !== before) reconnectAll();
+});
+
+/* backup */
+function askPass(title, desc, hint) {
+  return new Promise((resolve) => {
+    $("#pass-title").textContent = title; $("#pass-desc").textContent = desc; $("#pass-hint").textContent = hint;
+    const input = $("#pass-input"); input.value = "";
+    const dlg = $("#dlg-pass");
+    const done = () => { dlg.removeEventListener("close", done); resolve(dlg.returnValue === "ok" ? input.value : null); };
+    dlg.addEventListener("close", done);
+    $("#form-pass").onsubmit = (e) => { e.preventDefault(); dlg.close("ok"); };
+    $$("[data-close]", dlg).forEach((b) => (b.onclick = () => dlg.close("")));
+    dlg.showModal(); input.focus();
+  });
+}
+async function passKey(pass, salt, iter) {
+  const km = await crypto.subtle.importKey("raw", enc(pass), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iter }, km, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+$("#btn-export").addEventListener("click", async () => {
+  const pass = await askPass("Lock the backup", "Choose a passphrase. You will need it to import this file on another device.", "At least 8 characters. There is no way to recover it.");
+  if (!pass) return;
+  const salt = randomBytes(16), iv = randomBytes(12), iter = 310000;
+  const key = await passKey(pass, salt, iter);
+  const inner = JSON.stringify({ me: state.me, relays: state.relays, rooms: state.rooms, order: state.order, contacts: state.contacts });
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc(inner)));
+  const payload = { app: "private-messenger", version: 1, exportedAt: new Date().toISOString(), kdf: { name: "PBKDF2-SHA256", salt: b64url(salt), iter }, iv: b64url(iv), data: b64url(ct) };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "messenger-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$("#btn-import").addEventListener("click", () => $("#file-import").click());
+$("#file-import").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const msg = $("#import-msg");
+  try {
+    const payload = JSON.parse(await file.text());
+    if (payload.app !== "private-messenger" || !payload.kdf) throw new Error("not a messenger backup");
+    const pass = await askPass("Unlock the backup", "Enter the passphrase this backup was locked with.", "");
+    if (!pass) return;
+    const key = await passKey(pass, unb64url(payload.kdf.salt), payload.kdf.iter);
+    let inner;
+    try { inner = JSON.parse(td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64url(payload.iv) }, key, unb64url(payload.data)))); }
+    catch (err) { throw new Error("wrong passphrase"); }
+    if (!inner.me || !inner.rooms) throw new Error("backup is incomplete");
+    if (!confirm("Replace the identity and rooms on this device with the ones in the backup?")) return;
+    for (const net of nets.values()) net.close();
+    nets.clear(); roomKeys.clear();
+    for (const id of Object.keys(state.rooms)) forgetMsgs(id);
+    state.me = inner.me; state.rooms = inner.rooms; state.order = inner.order || Object.keys(inner.rooms);
+    state.contacts = inner.contacts || {}; state.relays = inner.relays || DEFAULT_RELAYS.slice(); state.active = null;
+    for (const r of Object.values(state.rooms)) { r.lastSeen = 0; r.unread = 0; r.last = ""; r.lastTs = 0; }
+    save();
+    await loadPrivKey();
+    renderMe(); renderRooms(); renderChat();
+    $("#set-name").value = state.me.name; $("#set-fp").textContent = state.me.fp;   // the open dialog still shows the old identity
+    renderRelays();
+    for (const id of state.order) connectRoom(state.rooms[id]);
+    msg.textContent = `Imported ${state.order.length} room(s). Messages are being fetched from the relays.`;
+  } catch (err) { msg.textContent = "Import failed: " + err.message; }
+});
+$("#btn-reset").addEventListener("click", () => {
+  if (!confirm("Delete your identity, every room and every message from this device? Without a backup, rooms can only be rejoined with their invite links.")) return;
+  for (const net of nets.values()) net.close();
+  nets.clear();
+  for (const id of Object.keys(state.rooms)) forgetMsgs(id);
+  localStorage.removeItem(STORE_KEY);
+  location.hash = ""; location.reload();
+});
+
+/* --------------------------------------------------------------- boot */
+
+async function boot() {
+  applyTheme();
+  if (!crypto.subtle || typeof BigInt === "undefined") {
+    document.body.innerHTML = `<div class="chat-empty"><div><h3>This browser cannot run the messenger</h3><p>It needs WebCrypto, which browsers only enable on https:// pages and on localhost, and BigInt.</p></div></div>`;
+    return;
+  }
+  checkHash();
+  if (!state.me) {
+    await new Promise((resolve) => {
+      const dlg = $("#dlg-welcome");
+      $("#form-welcome").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const name = $("#welcome-name").value.trim().slice(0, 40);
+        if (!name) return;
+        state.me = await newIdentity(name);
+        save(); dlg.close(); resolve();
+      });
+      dlg.showModal();
+      $("#welcome-name").focus();
+    });
+  }
+  await loadPrivKey();
+  renderMe(); renderRooms();
+  for (const id of state.order) connectRoom(state.rooms[id]);
+  if (state.active && state.rooms[state.active]) openRoom(state.active); else renderChat();
+  if (pendingInvite) offerJoin(pendingInvite);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    for (const net of nets.values()) for (const l of net.links) if (l.state === "closed" && !l.closedByUs) { clearTimeout(l.timer); l.attempt = 0; l.open(); }
+  });
+  window.addEventListener("online", () => { for (const net of nets.values()) for (const l of net.links) if (l.state === "closed") { clearTimeout(l.timer); l.open(); } });
+  setInterval(renderRooms, 60000);
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "private-messenger",
+  "private": true,
+  "version": "2.0.0",
+  "description": "End-to-end encrypted messenger on the Signal protocol, running on Cloudflare.",
+  "workspaces": ["client", "worker"],
+  "scripts": {
+    "test": "npm run test -w worker && npm run test -w client",
+    "build": "npm run build -w client",
+    "dev:worker": "npm run dev -w worker",
+    "dev:client": "npm run dev -w client",
+    "e2e": "node e2e/run.mjs"
+  }
+}
