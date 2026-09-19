@@ -98,7 +98,8 @@ relays instead, and then nobody runs a server, including you.
   device after it fetches and decrypts.
 
 Full specifications: [docs/API.md](docs/API.md) and
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
+[docs/PROTOCOL.md](docs/PROTOCOL.md). What works today against what Signal
+has, and what is still missing, is in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Scale
 

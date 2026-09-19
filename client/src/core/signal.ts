@@ -72,6 +72,33 @@ export async function xeddsaSign(identityPrivKey: ArrayBuffer | Uint8Array, mess
   return new Uint8Array(sig);
 }
 
+/* ---------- classical binding for the post-quantum hybrid layer (docs/POSTQUANTUM.md) ---------- */
+
+/**
+ * A fresh one-shot X25519 keypair. Used to bind a classical Diffie-Hellman
+ * secret into the post-quantum hybrid root at session establishment; see
+ * `classicalAgreement` below and messenger.ts's `establishPqSession`.
+ */
+export async function generateEphemeralKeyPair(): Promise<KeyPairType> {
+  const curve = await getCurve();
+  return curve.generateKeyPair();
+}
+
+/**
+ * X25519 Diffie-Hellman between `ourPrivKey` and the peer's 33-byte identity
+ * (or ephemeral) public key. Both sides of a DH agree regardless of which
+ * supplied the public vs. the private half, so this is usable symmetrically:
+ * the initiator computes it from a fresh ephemeral private key and the
+ * recipient's long-term identity public key; the recipient computes the same
+ * value from their own long-term identity private key and the ephemeral
+ * public key the initiator sent in the clear.
+ */
+export async function classicalAgreement(peerPublicKey33: ArrayBuffer | Uint8Array, ourPrivKey: ArrayBuffer | Uint8Array): Promise<Uint8Array> {
+  const curve = await getCurve();
+  const shared = curve.calculateAgreement(toArrayBuffer(peerPublicKey33), toArrayBuffer(ourPrivKey));
+  return new Uint8Array(shared);
+}
+
 /**
  * True when `sig` is a valid XEdDSA signature of `message` under the 33-byte identity key.
  * Note: the library's `Curve.verifySignature` returns `true` when the signature is INVALID

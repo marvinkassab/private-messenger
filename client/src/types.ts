@@ -23,6 +23,8 @@ export interface Contact {
   identityChanged?: boolean;            // key changed since we last trusted it; blocks sending until accepted
   addedAt: number;
   hasDeliveryToken: boolean;            // we can send to them sealed
+  pqIdentityKeyB64?: string;            // their ML-DSA-65 identity public key, once known (docs/POSTQUANTUM.md)
+  classicalOnly?: boolean;              // confirmed: this contact has no post-quantum keys (pre-PQ client)
 }
 
 export interface GroupState {
@@ -148,6 +150,10 @@ export interface PreKeyBundleWire {
   registrationId: number;
   signedPreKey: { keyId: number; publicKey: string; signature: string };
   preKey?: { keyId: number; publicKey: string };
+  /* Post-quantum half (docs/POSTQUANTUM.md); absent when the account predates the layer. */
+  pqIdentityKey?: string;
+  pqSignedPreKey?: { keyId: number; publicKey: string; signature: string; pqSignature: string };
+  pqPreKey?: { keyId: number; publicKey: string };
 }
 /* Carries no time of any kind: the server stores none, and when a message was
    written lives inside the ciphertext. The id is a sortable sequence. */

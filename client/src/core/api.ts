@@ -63,6 +63,11 @@ export interface RegisterBody {
   deliveryToken: string;
   signedPreKey: { keyId: number; publicKey: string; signature: string };
   oneTimePreKeys: Array<{ keyId: number; publicKey: string }>;
+  /* Post-quantum half (docs/POSTQUANTUM.md). Optional at the API level but sent by every
+     current client; all-or-nothing (the server 400s a partial upgrade). */
+  pqIdentityKey?: string;
+  pqSignedPreKey?: { keyId: number; publicKey: string; signature: string; pqSignature: string };
+  pqOneTimePreKeys?: Array<{ keyId: number; publicKey: string }>;
 }
 
 export interface PushSubscriptionWire {
@@ -164,11 +169,13 @@ export class ApiClient {
   putKeys(body: {
     signedPreKey?: { keyId: number; publicKey: string; signature: string };
     oneTimePreKeys?: Array<{ keyId: number; publicKey: string }>;
-  }): Promise<{ oneTimePreKeyCount: number }> {
+    pqSignedPreKey?: { keyId: number; publicKey: string; signature: string; pqSignature: string };
+    pqOneTimePreKeys?: Array<{ keyId: number; publicKey: string }>;
+  }): Promise<{ oneTimePreKeyCount: number; pqOneTimePreKeyCount?: number }> {
     return this.json("PUT", "/v1/keys", { body });
   }
 
-  keysCount(): Promise<{ oneTimePreKeyCount: number }> {
+  keysCount(): Promise<{ oneTimePreKeyCount: number; pqOneTimePreKeyCount?: number }> {
     return this.json("GET", "/v1/keys/count");
   }
 

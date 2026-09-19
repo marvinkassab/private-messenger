@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Private Messenger</title>
+<meta name="description" content="End-to-end encrypted messenger on the Signal protocol. Messages are encrypted on your device; the server only ever sees ciphertext.">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-180.svg">
+<meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Messenger">
+<meta name="color-scheme" content="light dark">
+<script>
+  /* Apply the saved theme before first paint to avoid a flash. */
+  try { var t = localStorage.getItem("pm.theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+</script>
+  <script type="module" crossorigin src="./assets/index-DhOMvZEQ.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-r-pYX83v.css">
+</head>
+<body>
+<div id="preview-banner" style="position:fixed;inset:0 0 auto 0;z-index:99999;background:#8a3b00;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:9px 14px;display:flex;gap:10px;align-items:center;justify-content:center;text-align:center">
+<span>Interface preview only. Messages here are fake and nothing is encrypted. This is not your messenger.</span>
+<button onclick="document.getElementById('preview-banner').remove();document.body.style.paddingTop='0'" style="flex:none;background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:6px;padding:4px 9px;font:inherit;cursor:pointer">Hide</button>
+</div>
+<script>document.addEventListener("DOMContentLoaded",function(){document.body.style.paddingTop="38px"});</script>
+
+<div id="app"></div>
+<noscript>Private Messenger needs JavaScript: all encryption happens in your browser.</noscript>
+</body>
+</html>
