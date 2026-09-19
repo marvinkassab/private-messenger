@@ -40,6 +40,45 @@ fi
 say() { printf '\n== %s\n' "$1"; }
 wr() { (cd worker && npx wrangler "$@"); }
 
+say "Checking the API token"
+# Failing here with a clear name beats failing three steps later with a 403
+# whose message does not say which permission is missing.
+set +e
+TOKEN_CHECK=$(curl -sS --max-time 20 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>&1)
+CURL_STATUS=$?
+set -e
+if [[ $CURL_STATUS -ne 0 ]]; then
+  # Distinguish "cannot reach Cloudflare" from "Cloudflare said no": blaming
+  # the token for a proxy or offline machine sends you looking in the wrong place.
+  echo "Could not reach api.cloudflare.com, so the token was never checked." >&2
+  echo "Check your network or proxy, then run this again." >&2
+  echo "$TOKEN_CHECK" >&2
+  exit 1
+fi
+if ! echo "$TOKEN_CHECK" | grep -q '"success":true'; then
+  echo "Cloudflare rejected the API token." >&2
+  echo "$TOKEN_CHECK" >&2
+  exit 1
+fi
+echo "token accepted"
+
+if ! curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets" \
+  | grep -q '"success":true'; then
+  cat >&2 <<'MISSING'
+
+The token cannot see R2. Add this permission to it and run again:
+
+  Account -> Workers R2 Storage -> Edit
+
+(The "Edit Cloudflare Workers" template does not include R2 or Pages; both
+have to be added by hand on the token screen before you create it.)
+MISSING
+  exit 1
+fi
+echo "R2 permission present"
+
 say "Installing dependencies"
 (cd worker && npm install --legacy-peer-deps --workspaces=false >/dev/null)
 (cd client && npm install --legacy-peer-deps --workspaces=false >/dev/null)

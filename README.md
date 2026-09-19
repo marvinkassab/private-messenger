@@ -154,9 +154,19 @@ You need a GitHub account and a Cloudflare account (the free plan works).
 ### 2. Cloudflare account pieces
 
 1. Dashboard sidebar: copy your **Account ID**.
-2. **My Profile → API Tokens → Create Token → Edit Cloudflare Workers**
-   template. Add the permission **Account → Cloudflare Pages → Edit** and
-   **Account → Workers R2 Storage → Edit**. Copy the token.
+2. **My Profile → API Tokens → Create Token**, choose the **Edit Cloudflare
+   Workers** template, then add two permissions before creating it, because
+   the template does not include either:
+
+   | Type | Resource | Level |
+   | --- | --- | --- |
+   | Account | Workers R2 Storage | Edit |
+   | Account | Cloudflare Pages | Edit |
+
+   Or use **Create Custom Token** with these five rows: Workers Scripts
+   (Edit), Workers R2 Storage (Edit), Cloudflare Pages (Edit), Account
+   Settings (Read), and Zone → Workers Routes (Edit). Under **Account
+   Resources**, select your account. Copy the token.
 3. **R2 → Create bucket** named `private-messenger-attachments`. In the
    bucket's **Settings → Object lifecycle rules**, add a rule that deletes
    objects 30 days after upload.
