@@ -3,12 +3,12 @@
   "private": true,
   "version": "2.0.0",
   "description": "End-to-end encrypted messenger on the Signal protocol, running on Cloudflare.",
-  "workspaces": ["client", "worker"],
   "scripts": {
-    "test": "npm run test -w worker && npm run test -w client",
-    "build": "npm run build -w client",
-    "dev:worker": "npm run dev -w worker",
-    "dev:client": "npm run dev -w client",
+    "install:all": "cd client && npm install --legacy-peer-deps && cd ../worker && npm install --legacy-peer-deps",
+    "test": "cd worker && npm test && cd ../client && npm test",
+    "build": "cd client && npm run build",
+    "dev:worker": "cd worker && npm run dev",
+    "dev:client": "cd client && npm run dev",
     "e2e": "node e2e/run.mjs"
   }
 }
