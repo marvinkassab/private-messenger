@@ -53,8 +53,11 @@ import {
   signPqPreKey,
   verifyPqPreKey,
   type KeyPair as PqKeyPair,
+  type PqSessionState,
   type SerializedPqSession,
 } from "./pq";
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha512 } from "@noble/hashes/sha2.js";
 import { applyGroupUpdate, describeGroupChange, isGroupAdmin } from "./groups";
 import { decryptAttachment, encryptAttachment, isImageMime, prepareImage } from "./attachments";
 import { type RecordIndex, Store } from "./store";
@@ -168,18 +171,57 @@ interface PqPendingInit {
   ephPubB64: string;
 }
 
-/** Everything persisted per peer for the hybrid layer: the pq.ts session state (chain keys,
- *  counters and the skipped-key store, all covered by serializePqSession) plus, until our
- *  first message to them actually goes out, the not-yet-sent opener fields. Stored in the
- *  "sessions" store (already encrypted at rest) under `pq:<username>`, alongside -- and
- *  backed up/restored the same way as -- the classical Signal session record. */
+/** Everything persisted per peer for the hybrid layer: two independent pq.ts session states
+ *  (chain keys, counters and the skipped-key store, all covered by serializePqSession) -- one
+ *  per direction -- plus, until our first message to them actually goes out, the not-yet-sent
+ *  opener fields. Stored in the "sessions" store (already encrypted at rest) under
+ *  `pq:<username>`, alongside -- and backed up/restored the same way as -- the classical
+ *  Signal session record.
+ *
+ *  pq.ts's PqSessionState is a SINGLE flat ratchet: `pqSeal` and `pqOpen` both advance the
+ *  same `counter`/`chainKey`, with no separate sending/receiving chains the way the classical
+ *  Signal library keeps (session-builder.js's `calculateSendingRatchet`, SessionCipher's
+ *  `ChainType.SENDING`/`RECEIVING`). Using ONE such state for both directions of a real,
+ *  concurrent conversation is unsafe: an unawaited background send -- a delivered receipt,
+ *  say -- can advance "the" counter on one side just as the other side independently sends
+ *  its own next message, and whichever arrives second is then rejected as "already used".
+ *  This is not a pq.ts bug (its own reference suite plausibly only exercises strict,
+ *  synchronized round trips) and is not fixed by touching pq.ts. It is fixed here by
+ *  splitting the single root chain/header key pq.ts hands back into two independent chains --
+ *  one the initiator only ever sends on, one the responder only ever sends on -- via an
+ *  ordinary HKDF domain-separation step, exactly mirroring why the classical library keeps
+ *  separate sending/receiving chains in the first place. Both directions still ultimately
+ *  descend from the same hybrid root (deriveRoot's ikm), so this splits, but does not weaken,
+ *  what pq.ts already derived. */
 interface PqPeerSession {
-  state: SerializedPqSession;
+  send: SerializedPqSession;
+  recv: SerializedPqSession;
   pendingInit: PqPendingInit | null;
 }
 
 function pqSessionKey(username: string): string {
   return `pq:${username}`;
+}
+
+const PQ_DIR_I2R = "pm-pq-dir-i2r"; // initiator -> responder
+const PQ_DIR_R2I = "pm-pq-dir-r2i"; // responder -> initiator
+
+/** One independent directional chain, split off the shared root pq.ts derived (see the
+ *  PqPeerSession comment above). `root` is used only for its `chainKey`/`headerKey`; its
+ *  counter, skipped-key store and KEM fields are not touched or reused. */
+function splitDirectionalState(root: Pick<PqSessionState, "chainKey" | "headerKey">, label: typeof PQ_DIR_I2R | typeof PQ_DIR_R2I, now: number): PqSessionState {
+  const material = concatBytes(root.chainKey, root.headerKey);
+  const out = hkdf(sha512, material, utf8Encode(label), new Uint8Array(0), 64);
+  return {
+    chainKey: out.slice(0, 32),
+    headerKey: out.slice(32, 64),
+    counter: 0,
+    sinceRekey: 0,
+    lastRekeyAt: now,
+    myKemPair: null,
+    peerKemPublic: null,
+    skipped: new Map(),
+  };
 }
 
 function u32be(n: number): Uint8Array {
@@ -610,7 +652,7 @@ export class MessengerImpl implements Messenger {
     const peerOneTimePub = bundle.pqPreKey ? b64Decode(bundle.pqPreKey.publicKey) : null;
     const peerPqIdentityPub = b64Decode(bundle.pqIdentityKey!);
 
-    const { state, init } = initiatePqSession({
+    const { state: rootState, init } = initiatePqSession({
       classicalSecret,
       peerSignedPreKey: peerSignedPreKeyPub,
       peerOneTimePreKey: peerOneTimePub,
@@ -618,14 +660,18 @@ export class MessengerImpl implements Messenger {
       responderIdentity: peerClassicalIdentity,
       pqIdentities: concatBytes(pqIdentity.publicKey, peerPqIdentityPub),
     });
-    // Seed the KEM ratchet: the peer's "current" key is what we just encapsulated to (their
-    // published signed prekey), so our own first re-key (should we send one first) targets it.
-    // See the pq.ts import comment in setupPqSessionAsInitiator's caller docs for why pq.ts
-    // itself leaves this null.
-    state.peerKemPublic = peerSignedPreKeyPub;
+    // Split into independent directional chains; see the PqPeerSession comment above.
+    const now = Date.now();
+    const sendState = splitDirectionalState(rootState, PQ_DIR_I2R, now);
+    const recvState = splitDirectionalState(rootState, PQ_DIR_R2I, now);
+    // Seed the KEM ratchet on OUR sending chain: the peer's "current" key is what we just
+    // encapsulated to (their published signed prekey), so our own first re-key targets it.
+    // pq.ts itself leaves this null; see the pq.ts import comment above `PQW_CLASSICAL`.
+    sendState.peerKemPublic = peerSignedPreKeyPub;
 
     const peer: PqPeerSession = {
-      state: serializePqSession(state),
+      send: serializePqSession(sendState),
+      recv: serializePqSession(recvState),
       pendingInit: {
         ctSignedB64: b64Encode(init.ctSigned),
         ctOneTimeB64: init.ctOneTime ? b64Encode(init.ctOneTime) : null,
@@ -819,13 +865,13 @@ export class MessengerImpl implements Messenger {
     const pqIdentity = peer ? await this.pqLoadIdentity() : undefined;
     if (!peer || !pqIdentity) return concatBytes(new Uint8Array([PQW_CLASSICAL]), rawSignalCiphertext);
 
-    const state = deserializePqSession(peer.state);
+    const state = deserializePqSession(peer.send);
     const pending = peer.pendingInit;
     const init = pending
       ? { ctSigned: b64Decode(pending.ctSignedB64), ctOneTime: pending.ctOneTimeB64 ? b64Decode(pending.ctOneTimeB64) : null }
       : null;
     const sealed = pqSeal(state, rawSignalCiphertext, { pqIdentitySecret: pqIdentity.secretKey, init });
-    await this.store.put("sessions", key, { state: serializePqSession(state), pendingInit: null } satisfies PqPeerSession);
+    await this.store.put("sessions", key, { send: serializePqSession(state), recv: peer.recv, pendingInit: null } satisfies PqPeerSession);
 
     if (pending) {
       const header = buildOpenerHeader(b64Decode(pending.ephPubB64), pqIdentity.publicKey, pending.oneTimeKeyId);
@@ -1479,7 +1525,7 @@ export class MessengerImpl implements Messenger {
       const { ctSigned, ctOneTime } = parseInitFieldsFromPqWire(pqWire, hasOneTime);
       const classicalSecret = await classicalAgreement(ephPub, ourClassical.privKey);
 
-      const state = acceptPqSession({
+      const rootState = acceptPqSession({
         classicalSecret,
         ctSigned,
         ctOneTime,
@@ -1489,12 +1535,21 @@ export class MessengerImpl implements Messenger {
         responderIdentity: ourClassical.pubBytes,
         pqIdentities: concatBytes(senderPqIdentityPub, ourPqIdentity.publicKey),
       });
+      // Split into independent directional chains; see the PqPeerSession comment above. We
+      // (the responder) receive on the initiator->responder chain and send on the reverse.
+      const now = Date.now();
+      const sendState = splitDirectionalState(rootState, PQ_DIR_R2I, now);
+      const recvState = splitDirectionalState(rootState, PQ_DIR_I2R, now);
       // See setupPqSessionAsInitiator: we advertised our signed prekey, so that is the key a
-      // peer's first re-key toward us will target.
-      state.myKemPair = { publicKey: signedPreKey.publicKey, secretKey: signedPreKey.secretKey };
+      // peer's first re-key toward us (on the chain they send on) will target.
+      recvState.myKemPair = { publicKey: signedPreKey.publicKey, secretKey: signedPreKey.secretKey };
 
-      const inner = pqOpen(state, pqWire, { peerPqIdentity: senderPqIdentityPub, myKemSecret: state.myKemPair.secretKey, hasOneTime });
-      await this.store.put("sessions", key, { state: serializePqSession(state), pendingInit: null } satisfies PqPeerSession);
+      const inner = pqOpen(recvState, pqWire, { peerPqIdentity: senderPqIdentityPub, myKemSecret: recvState.myKemPair.secretKey, hasOneTime });
+      await this.store.put("sessions", key, {
+        send: serializePqSession(sendState),
+        recv: serializePqSession(recvState),
+        pendingInit: null,
+      } satisfies PqPeerSession);
 
       let c = contact;
       if (!c) c = { username: sender, verified: false, addedAt: Date.now(), hasDeliveryToken: false, identityKeyB64: "" };
@@ -1505,14 +1560,14 @@ export class MessengerImpl implements Messenger {
       return inner;
     }
 
-    // PQW_ORDINARY: an already-established hybrid session.
+    // PQW_ORDINARY: an already-established hybrid session; open on our receiving chain.
     const peer = await this.store.get<PqPeerSession>("sessions", key);
     if (!peer) throw new Error(`post-quantum message from ${sender} for a session we have not established`);
     const peerPqIdentity = contact?.pqIdentityKeyB64 ? b64Decode(contact.pqIdentityKeyB64) : null;
     if (!peerPqIdentity) throw new Error(`no known post-quantum identity for ${sender}`);
-    const state = deserializePqSession(peer.state);
+    const state = deserializePqSession(peer.recv);
     const inner = pqOpen(state, rest, { peerPqIdentity, myKemSecret: state.myKemPair?.secretKey ?? null, hasOneTime: false });
-    await this.store.put("sessions", key, { state: serializePqSession(state), pendingInit: null } satisfies PqPeerSession);
+    await this.store.put("sessions", key, { send: peer.send, recv: serializePqSession(state), pendingInit: peer.pendingInit } satisfies PqPeerSession);
     return inner;
   }
 
