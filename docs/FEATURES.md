@@ -25,7 +25,7 @@ is planned, deliberately out of scope, or impossible in a web app.
 | Encrypted backup | Passphrase-locked export and import, to move an account to another browser |
 | App lock | A passphrase that encrypts the keys at rest |
 | Push notifications | Empty payload; the text is built on the device after decrypting |
-| Post-quantum layer | Beyond Signal's parameters. See POSTQUANTUM.md |
+| Post-quantum layer | ML-KEM-1024 and ML-DSA-65 wrapping every Signal message, with downgrade refusal and safety numbers covering both identity keys. See POSTQUANTUM.md |
 
 ## Planned
 

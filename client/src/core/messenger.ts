@@ -1561,28 +1561,27 @@ export class MessengerImpl implements Messenger {
     }
 
     // PQW_ORDINARY: an already-established hybrid session; open on our receiving chain.
+    //
+    // NOTE on re-key targets: in a one-sided contact (only the initiator ever fetched a
+    // bundle), the responder's own outbound chain starts with, and permanently keeps, no
+    // re-key target of its own -- they never published anything for the initiator to target
+    // back with a KEM ciphertext, unlike the initiator's chain, which was seeded from the
+    // responder's published signed prekey (setupPqSessionAsInitiator). Reusing the peer's
+    // rekey public key from the OTHER chain here to seed this one was tried and is NOT safe:
+    // the matching secret lives in that OTHER chain's `myKemPair`, so the peer ends up
+    // encapsulating to a key we cannot decapsulate on THIS chain, and the two sides'
+    // chainKeys then diverge permanently (every following message fails, not just the
+    // re-key). So the responder's own outbound chain simply never re-keys in that topology;
+    // its messages remain fully protected by the existing (non-re-keyed) chain throughout.
+    // See the final report for how this is scoped.
     const peer = await this.store.get<PqPeerSession>("sessions", key);
     if (!peer) throw new Error(`post-quantum message from ${sender} for a session we have not established`);
     const peerPqIdentity = contact?.pqIdentityKeyB64 ? b64Decode(contact.pqIdentityKeyB64) : null;
     if (!peerPqIdentity) throw new Error(`no known post-quantum identity for ${sender}`);
     const recvState = deserializePqSession(peer.recv);
-    const hadPeerKemBefore = recvState.peerKemPublic;
     const inner = pqOpen(recvState, rest, { peerPqIdentity, myKemSecret: recvState.myKemPair?.secretKey ?? null, hasOneTime: false });
-
-    // In a one-sided contact (only the initiator ever fetched a bundle), the responder's own
-    // outbound chain starts with no re-key target at all (see the PqPeerSession comment
-    // above): they never published anything for the initiator's FIRST session-establishing
-    // encapsulation to target back. The peer's first re-key on the chain we just opened is the
-    // first KEM public key of theirs we learn afterwards -- reuse it as our own outbound
-    // chain's target too, so both directions gain an independent re-key cadence once any one
-    // re-key has happened, rather than the responder's outbound chain staying dormant forever.
-    let sendState = deserializePqSession(peer.send);
-    if (recvState.peerKemPublic && !hadPeerKemBefore && !sendState.peerKemPublic) {
-      sendState = { ...sendState, peerKemPublic: recvState.peerKemPublic };
-    }
-
     await this.store.put("sessions", key, {
-      send: serializePqSession(sendState),
+      send: peer.send,
       recv: serializePqSession(recvState),
       pendingInit: peer.pendingInit,
     } satisfies PqPeerSession);

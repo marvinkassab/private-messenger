@@ -66,6 +66,10 @@ implementation and test suite:
 | Re-key message (1 KEM ciphertext + new public key + signature) | ~6.4 kB | ~5 ms |
 | Every other message | **50 B** | **0.086 ms** |
 
+Measured again in the finished client, where the figures also carry sealed
+sender and the JSON envelope around each message: 8794 B for a session
+opener, 8968 B for a re-key, and **376 B** for every message in between.
+
 So the post-quantum layer is effectively free in steady state; its cost lands
 on session setup and on roughly one message in a hundred.
 
@@ -120,6 +124,28 @@ PQ_root = HKDF-SHA512(
 `SK_classical` stays inside the Signal library and continues to drive the
 Double Ratchet untouched. `PQ_root` drives only the outer layer.
 
+**What `SK_classical` actually is, in the implementation.** The library's own
+X3DH secret turned out to be unreachable: the initiator's copy is overwritten
+by a ratchet step before the session handle is returned, and the responder's
+copy only exists as a side effect of decrypting the inner Signal message,
+which is precisely what the outer layer has to be opened *before*. Reaching it
+would mean hand-parsing the library's stored session format, which is a worse
+idea than the alternative.
+
+So the classical input is an independent X25519 exchange instead: a fresh
+ephemeral key from the initiator against the recipient's long-term identity
+key, with the ephemeral public key travelling beside the session opener. Both
+sides can compute it with no circular dependency.
+
+This satisfies the property the layer needs, that breaking only ML-KEM does
+not yield the outer key, since deriving it still requires breaking X25519 or
+stealing an identity private key. It is weaker than X3DH in one specific way:
+being ephemeral-static rather than the full four-way exchange, it does not
+give forward secrecy against a *stolen long-term identity key*. The Double
+Ratchet underneath still does, for the message itself, so the composition is
+unaffected. Stated plainly rather than glossed, because the difference is
+real.
+
 5. The initiator's first message carries `ct_signed` and `ct_onetime` in the
    outer header so the responder can decapsulate.
 
@@ -143,6 +169,32 @@ wire    = version(1) || flags(1) || counter(4) || nonce(24) ||
 The chain key ratchets forward on every message (`pqChainKey := nextChainKey`)
 and the used message key is destroyed, so the outer layer has its own forward
 secrecy independent of Signal's.
+
+### Two chains, not one
+
+The reference implementation in `docs/reference/` derives a single chain and
+uses it for both sending and receiving. That is wrong, and building the real
+thing is what exposed it: with one shared counter, a receipt arriving in the
+background while a reply is going out collides, and one of the two is rejected
+as a reused key. It showed up as an unrelated test failing.
+
+The client therefore splits the root into two independent directional chains
+with an HKDF step, `pm-pq-dir-i2r` and `pm-pq-dir-r2i`, and each direction
+ratchets on its own. This is exactly why the Signal library keeps separate
+sending and receiving chains, and the reference implementation should be read
+as a specification of the crypto rather than of the state machine.
+
+**A known limitation this leaves.** When only one side ever fetches the
+other's key bundle, which is the normal case for a contact added once, only
+that side's outbound chain has a re-key target. The other direction is fully
+encrypted and forward-secret, but never performs an independent post-quantum
+re-key, so it does not get continuous post-compromise security the way the
+first direction does. Fixing it properly needs the responder to publish a
+key the initiator can target, which is a second handshake round trip and has
+not been built. An attempt to reuse the peer's key from the opposite chain was
+written, found to be broken, and removed: the matching secret lives in the
+other chain's state, so the next re-key cannot be decapsulated and the two
+sides diverge permanently.
 
 ### Out-of-order delivery
 
