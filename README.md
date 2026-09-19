@@ -163,25 +163,17 @@ You need a GitHub account and a Cloudflare account (the free plan works).
 
 ### 3. The Worker (API)
 
-From your machine, once, with Node 22 installed:
+One script does the rest. With Node 22 installed:
 
 ```
-cd worker
-npm install --legacy-peer-deps
-npx wrangler login
-node -e "const k=require('crypto').generateKeyPairSync('ec',{namedCurve:'prime256v1'});const b=(x)=>x.toString('base64url');console.log('VAPID_PUBLIC_KEY='+b(k.publicKey.export({type:'spki',format:'der'}).subarray(-65)));console.log('VAPID_PRIVATE_KEY='+b(k.privateKey.export({type:'pkcs8',format:'der'}).subarray(36,68)))"
-npx wrangler secret put VAPID_PUBLIC_KEY      # paste the value printed above
-npx wrangler secret put VAPID_PRIVATE_KEY
-npx wrangler secret put VAPID_SUBJECT         # mailto:you@example.com
-npx wrangler secret put BOOTSTRAP_INVITE      # any long random string; your first invite
-npx wrangler deploy
+export CLOUDFLARE_API_TOKEN=...      # from step 2
+export CLOUDFLARE_ACCOUNT_ID=...     # from step 2
+./scripts/setup-cloudflare.sh
 ```
 
-The deploy prints the Worker URL, like
-`https://private-messenger.<account>.workers.dev`. That is `API_URL`.
-Then edit `worker/wrangler.toml` and set `ALLOWED_ORIGINS` to your Pages URL
-from step 4 (and your custom domain, if any), commit, and push; the Deploy
-workflow redeploys it.
+It creates the R2 bucket, generates the push keys, stores the four secrets,
+deploys the Worker, prints its URL and your first invite code, and tells you
+the values to paste into GitHub. It is safe to run again.
 
 ### 4. The client (Pages)
 
@@ -190,16 +182,14 @@ workflow redeploys it.
 2. Build settings: framework **None**, build command
    `cd client && npm install --legacy-peer-deps && npm run build`,
    build output directory `client/dist`, and an environment variable
-   `VITE_API_URL` = your Worker URL.
+   `VITE_API_URL` = the Worker URL the script printed.
 3. Deploy. The project name you chose is `PAGES_PROJECT`; the site is at
    `https://<project>.pages.dev`.
-4. Optional: **Custom domains → Set up a custom domain**, for example
-   `chat.yourdomain.com`. Add it to `ALLOWED_ORIGINS` too.
+4. Put that URL into `ALLOWED_ORIGINS` in `worker/wrangler.toml`, commit and
+   push. Optionally add a custom domain such as `chat.yourdomain.com`, and
+   list it there too.
 
-After this, every push to `main` runs the tests and redeploys both halves
-through GitHub Actions. You can also skip Actions entirely and let Pages
-build from Git on its own; the workflow is there so the Worker and the
-client always ship together.
+After this, every push to `main` runs the tests and redeploys both halves.
 
 ### 5. First users
 
