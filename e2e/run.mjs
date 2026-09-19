@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,12 +31,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const check = (ok, label) => { console.log((ok ? "PASS " : "FAIL ") + label); if (!ok) failures++; };
 
-function run(cmd, args, cwd, env = {}) {
-  const p = spawn(cmd, args, { cwd, env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1", ...env }, stdio: ["ignore", "pipe", "pipe"] });
-  p.stdout.on("data", (d) => { if (process.env.E2E_VERBOSE) process.stdout.write(`[${args[0]}] ${d}`); });
-  p.stderr.on("data", (d) => { if (process.env.E2E_VERBOSE) process.stderr.write(`[${args[0]}] ${d}`); });
+/* Long-running servers are started from their real binaries, not through npx,
+   and in their own process group. Going through npx leaves the actual server
+   alive when the wrapper is killed: a stale client server then keeps the port
+   and the next run silently tests an old build, which is exactly what happened. */
+function run(bin, args, cwd, env = {}) {
+  const p = spawn(bin, args, {
+    cwd,
+    env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1", ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+  p.stdout.on("data", (d) => { if (process.env.E2E_VERBOSE) process.stdout.write(`[${path.basename(bin)}] ${d}`); });
+  p.stderr.on("data", (d) => { if (process.env.E2E_VERBOSE) process.stderr.write(`[${path.basename(bin)}] ${d}`); });
   procs.push(p);
   return p;
+}
+
+/** Kills a server and every process it spawned. */
+function stop(p) {
+  try { process.kill(-p.pid, "SIGTERM"); } catch { try { p.kill("SIGTERM"); } catch { /* already gone */ } }
+}
+
+/** Refuses to run against a port something else is already serving. */
+async function requireFreePort(port, what) {
+  let inUse = false;
+  try {
+    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
+    inUse = true;
+  } catch { /* nothing listening: good */ }
+  if (inUse) {
+    throw new Error(
+      `port ${port} is already serving something: a previous run's ${what} is still alive. ` +
+      `Kill it first, otherwise this test would quietly check a stale build.`,
+    );
+  }
 }
 async function waitFor(url, ms = 60000) {
   const t0 = Date.now();
@@ -53,13 +83,23 @@ function sh(cmd, args, cwd, env = {}) {
 }
 
 // ---- boot the stack
+// A fresh Durable Object store per run, so the test is repeatable: local
+// wrangler state otherwise persists between runs and the second one fails
+// with "username is already registered".
+const STATE = fs.mkdtempSync(path.join(os.tmpdir(), "pm-e2e-state-"));
 fs.writeFileSync(path.join(ROOT, "worker", ".dev.vars"),
   `BOOTSTRAP_INVITE=${BOOTSTRAP}\nALLOWED_ORIGINS=${APP.replace(/\/$/, "")}\nVAPID_SUBJECT=mailto:e2e@example.com\n`);
-run("npx", ["wrangler", "dev", "--local", "--port", String(WORKER_PORT)], path.join(ROOT, "worker"));
+await requireFreePort(WORKER_PORT, "worker");
+await requireFreePort(CLIENT_PORT, "client preview server");
+run(path.join(ROOT, "worker", "node_modules", ".bin", "wrangler"),
+    ["dev", "--local", "--port", String(WORKER_PORT), "--persist-to", STATE],
+    path.join(ROOT, "worker"));
 await waitFor(`${API}/v1/health`);
 console.log("worker up");
-await sh("npx", ["vite", "build", "--outDir", "dist-e2e"], path.join(ROOT, "client"), { VITE_API_URL: API });
-run("npx", ["vite", "preview", "--outDir", "dist-e2e", "--port", String(CLIENT_PORT), "--strictPort"], path.join(ROOT, "client"));
+await sh(path.join(ROOT, "client", "node_modules", ".bin", "vite"), ["build", "--outDir", "dist-e2e"], path.join(ROOT, "client"), { VITE_API_URL: API });
+run(path.join(ROOT, "client", "node_modules", ".bin", "vite"),
+    ["preview", "--outDir", "dist-e2e", "--port", String(CLIENT_PORT), "--strictPort"],
+    path.join(ROOT, "client"));
 await waitFor(APP);
 console.log("client up");
 
@@ -95,7 +135,7 @@ try {
   const bob2 = await person("bob-dup");
   await bob2.goto(APP);
   const err = await S.registerExpectError(bob2, { username: "bob", invite: BOOTSTRAP, name: "Bob again" });
-  check(/taken|exists|409/i.test(err), "duplicate username is refused (" + err + ")");
+  check(/taken|exists|already|registered|409/i.test(err), "duplicate username is refused (" + err + ")");
 
   await S.addContact(alice, "bob");
   await S.openChat(alice, "bob");
@@ -148,12 +188,15 @@ try {
   failures++;
   console.log("FAIL exception:", e.stack || e.message);
 } finally {
-  const errs = pageErrors.filter((e) => !/favicon|sw\.js|service worker/i.test(e));
+  const errs = pageErrors.filter(
+    (e) => !/favicon|sw\.js|service worker/i.test(e) && !/^bob-dup:/.test(e),
+  );
   check(errs.length === 0, "no page errors" + (errs.length ? ": " + errs.slice(0, 5).join(" | ") : ""));
   await browser.close();
-  for (const p of procs) p.kill("SIGTERM");
+  for (const p of procs) stop(p);
   // Leaving this behind overrides ALLOWED_ORIGINS for the worker's own tests.
   fs.rmSync(path.join(ROOT, "worker", ".dev.vars"), { force: true });
+  fs.rmSync(STATE, { recursive: true, force: true });
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL PASSED");
   process.exit(failures ? 1 : 0);
 }

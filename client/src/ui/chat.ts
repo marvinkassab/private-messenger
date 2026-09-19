@@ -248,11 +248,19 @@ export function mountChat(app: App, parent: HTMLElement): ChatView {
   function appendImageContent(m: Message, bubble: HTMLElement) {
     bubble.classList.add("img");
     const att = m.attachment!;
-    const ph = h("div.ph", { "data-test": "attachment-image" }, "Loading image…");
+    // The placeholder and the loaded image carry different test hooks, so a
+    // test that waits for the image cannot be satisfied by "Loading image…".
+    const ph = h("div.ph", { "data-test": "attachment-loading" }, "Loading image…");
     bubble.appendChild(ph);
     attachmentUrl(m).then((url) => {
       if (!url) { ph.textContent = "Could not load image"; return; }
-      const img = h("img", { src: url, alt: att.caption || att.name || "Photo", loading: "lazy", onclick: () => openViewer(url) });
+      const img = h("img", {
+        src: url,
+        alt: att.caption || att.name || "Photo",
+        loading: "lazy",
+        "data-test": "attachment-image",
+        onclick: () => openViewer(url),
+      });
       ph.replaceWith(img);
     });
   }

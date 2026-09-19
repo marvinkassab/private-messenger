@@ -67,31 +67,62 @@ export async function waitOnline(page, timeout = LONG) {
   );
 }
 
+/** Closes any modal dialog left open. A modal <dialog> makes the rest of the
+ *  page inert, so a stray one turns every later click into a timeout whose
+ *  message ("<html> intercepts pointer events") says nothing about the cause. */
+export async function dismissDialogs(page) {
+  for (let i = 0; i < 3; i++) {
+    const open = await page.$$("dialog[open]");
+    if (open.length === 0) return;
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+  }
+}
+
 /* ---------------------------------------------------------------- chats */
 
-/** Opens a chat by its title, or by the contact's username. */
+/** Opens a chat by its title, or by the contact's username.
+ *
+ * Uses a locator rather than an element handle: the chat list re-renders
+ * whenever a message or receipt arrives, which detaches a handle grabbed a
+ * moment earlier and makes the click fail intermittently. A locator
+ * re-resolves on each attempt. */
 export async function openChat(page, titleOrUsername) {
-  const item = `${T("chat-item")}[data-title="${titleOrUsername}"]`;
-  const byTitle = await page.$(item);
-  if (byTitle) {
-    await byTitle.click();
-  } else {
-    await page.waitForSelector(T("chat-item"), { timeout: LONG });
-    const handle = await page.evaluateHandle(
-      ([sel, needle]) =>
-        Array.from(document.querySelectorAll(sel)).find((el) =>
-          (el.getAttribute("data-title") || el.textContent || "").toLowerCase().includes(needle.toLowerCase()),
-        ) || null,
-      [T("chat-item"), titleOrUsername],
-    );
-    const el = handle.asElement();
-    if (!el) throw new Error(`no chat matching "${titleOrUsername}"`);
-    await el.click();
+  await dismissDialogs(page);
+
+  // Already in the right conversation? Nothing to do. This is checked without
+  // requiring the chat list to be visible, because at phone width the list is
+  // hidden whenever a conversation is open.
+  const already = await page.evaluate(
+    ([sel, needle]) => {
+      const el = document.querySelector(`${sel}[aria-current="true"]`);
+      if (!el) return false;
+      const title = (el.getAttribute("data-title") || el.textContent || "").toLowerCase();
+      return title.includes(needle.toLowerCase());
+    },
+    [T("chat-item"), titleOrUsername],
+  );
+  if (already && (await page.$(T("composer-input")))) return;
+
+  // On a phone the list is behind the back button while a chat is open.
+  const back = await page.$("#btn-back");
+  if (back && (await back.isVisible())) {
+    await back.click();
+    await page.waitForTimeout(200);
   }
+
+  await page.waitForSelector(T("chat-item"), { state: "visible", timeout: LONG });
+  const exact = page.locator(`${T("chat-item")}[data-title="${titleOrUsername}"]`);
+  const loose = page
+    .locator(T("chat-item"))
+    .filter({ hasText: new RegExp(titleOrUsername.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") });
+  const target = (await exact.count()) > 0 ? exact.first() : loose.first();
+  await target.click({ timeout: LONG });
   await page.waitForSelector(T("composer-input"), { timeout: LONG });
 }
 
 export async function addContact(page, username) {
+  await dismissDialogs(page);
   await page.click(T("new-chat-btn"));
   await page.waitForSelector(`${T("new-chat-dialog")}[open]`, { timeout: LONG });
   await page.fill(T("new-chat-username"), username);
@@ -100,6 +131,7 @@ export async function addContact(page, username) {
 }
 
 export async function createGroup(page, name, members) {
+  await dismissDialogs(page);
   await page.click(T("new-group-btn"));
   await page.waitForSelector(`${T("new-group-dialog")}[open]`, { timeout: LONG });
   await page.fill(T("group-name"), name);
@@ -183,16 +215,12 @@ export async function seesImage(page, timeout = LONG) {
 }
 
 export async function react(page, needle, emoji) {
-  const handle = await page.evaluateHandle(
-    ([msgSel, text]) =>
-      Array.from(document.querySelectorAll(msgSel)).find((el) => el.textContent.includes(text)) || null,
-    [T("message"), needle],
-  );
-  const msg = handle.asElement();
-  if (!msg) throw new Error(`no message matching "${needle}"`);
+  // Locator, not a handle: the message list re-renders on every receipt.
+  const msg = page.locator(T("message")).filter({ hasText: needle }).first();
+  await msg.waitFor({ timeout: LONG });
   await msg.hover();
-  const actions = await msg.$(T("msg-actions"));
-  if (actions) await actions.click();
+  const actions = msg.locator(T("msg-actions"));
+  if ((await actions.count()) > 0) await actions.first().click({ timeout: LONG });
   await page.waitForSelector(T("msg-menu"), { timeout: LONG });
   await page.click(`${T("react-btn")}[data-emoji="${emoji}"]`);
   await page.waitForSelector(`${T("reaction")}[data-emoji="${emoji}"]`, { timeout: LONG });
@@ -212,6 +240,7 @@ export async function safetyNumber(page, _peer) {
 }
 
 export async function mintInvite(page) {
+  await dismissDialogs(page);
   await page.click(T("settings-btn"));
   await page.waitForSelector(`${T("settings-dialog")}[open]`, { timeout: LONG });
   await page.click(T("invite-mint-btn"));
@@ -231,6 +260,7 @@ export async function mintInvite(page) {
 }
 
 export default {
+  dismissDialogs,
   register,
   registerExpectError,
   isSignedIn,

@@ -1184,8 +1184,13 @@ export class MessengerImpl implements Messenger {
   async mintInvite(): Promise<{ code: string; expiresAt: number; link: string }> {
     this.assertReady();
     const r = await this.api.mintInvite();
-    const base = (this.appUrl ?? this.api.baseUrl).replace(/\/+$/, "");
-    return { code: r.code, expiresAt: r.expiresAt, link: `${base}/invite/${r.code}` };
+    const base = (this.appUrl ?? this.api.baseUrl).replace(/\/+$/, "").replace(/#.*$/, "");
+    /* The code goes in the fragment, not the path. Two reasons: the
+       registration screen reads it from there, and a fragment is never sent to
+       any server, so the invite code stays out of request logs and out of the
+       hands of whoever hosts the page. A path would also 404 on a static host
+       without a rewrite rule. */
+    return { code: r.code, expiresAt: r.expiresAt, link: `${base}#invite=${encodeURIComponent(r.code)}` };
   }
 
   async enablePush(): Promise<boolean> {
