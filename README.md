@@ -9,9 +9,10 @@ no accounts to buy, and a server that never sees a word.
   R2 for encrypted attachments, and Web Push for wake-ups. No database
   server, no VM, nothing to patch.
 - **Crypto:** X3DH key agreement and the Double Ratchet from Signal's own
-  protocol library (TypeScript port), sealed sender, Signal-style safety
-  numbers, disappearing messages, and an optional passphrase lock for keys
-  at rest.
+  protocol library (TypeScript port), wrapped in a **post-quantum hybrid
+  layer** (ML-KEM-1024 + ML-DSA-65) that Signal's classical design does not
+  have. Plus sealed sender, Signal-style safety numbers, disappearing
+  messages, and an optional passphrase lock for keys at rest.
 
 ```
  phone / laptop                      Cloudflare                          phone / laptop
@@ -186,6 +187,19 @@ secrecy and post-compromise security), safety numbers with the same
 algorithm, sealed sender, disappearing messages, invite-only with no phone
 numbers, attachments encrypted with per-file keys, nothing readable on the
 server.
+
+**Stronger than Signal, on paper:** a post-quantum hybrid layer wraps every
+Signal ciphertext, so an attacker must break both independently. It uses
+ML-KEM-1024 (NIST category 5) where Signal's PQXDH uses ML-KEM-768
+(category 3), re-keys the post-quantum secret continuously rather than only
+at session setup, and adds ML-DSA-65 signatures so identity is post-quantum
+too, which Signal's design does not cover. Steady-state cost measured at
+50 bytes and 0.086 ms per message. The design, its threat model, and its
+limits are in [docs/POSTQUANTUM.md](docs/POSTQUANTUM.md).
+
+The honest caveat: stronger parameters are not the same as safer software.
+Signal's protocol has been attacked by professionals for a decade; this has
+been reviewed by nobody.
 
 **Not yet the same:**
 
