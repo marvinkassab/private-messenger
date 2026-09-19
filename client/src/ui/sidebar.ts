@@ -12,8 +12,8 @@ const CONN_LABEL = { online: "Online", connecting: "Connecting…", offline: "Of
 const CONN_CLASS = { online: "", connecting: "stale", offline: "err" } as const;
 
 export function mountSidebar(app: App, parent: HTMLElement): Sidebar {
-  const dot = h("span.dot-live", { id: "conn-dot" });
-  const connText = h("span", { id: "conn-text" });
+  const dot = h("span.dot-live", { id: "conn-dot", "data-test": "connection-dot" });
+  const connText = h("span", { id: "conn-text", "data-test": "connection-indicator" });
   const themeBtn = h("button.btn.icon", { id: "btn-theme", type: "button", "aria-label": "Switch theme", onclick: () => {
     const order: Theme[] = ["auto", "light", "dark"];
     setTheme(order[(order.indexOf(getTheme()) + 1) % order.length]);
@@ -26,9 +26,9 @@ export function mountSidebar(app: App, parent: HTMLElement): Sidebar {
   const meName = h("div.nm");
   const meSub = h("div.fp");
   const meAv = h("div");
-  const meCard = h("button.me-card", { id: "me-card", type: "button", title: "Settings", onclick: () => app.openSettings() }, meAv, h("div", meName, meSub));
+  const meCard = h("button.me-card", { id: "me-card", type: "button", title: "Settings", "data-test": "me-card", onclick: () => app.openSettings() }, meAv, h("div", meName, meSub));
 
-  const search = h("input", { type: "search", id: "search", placeholder: "Search chats", "aria-label": "Search chats", autocomplete: "off",
+  const search = h("input", { type: "search", id: "search", placeholder: "Search chats", "aria-label": "Search chats", autocomplete: "off", "data-test": "search-input",
     oninput: () => { app.s.search = search.value.trim().toLowerCase(); render(); } });
 
   const rooms = h("nav.rooms", { id: "rooms", "aria-label": "Chats" });
@@ -40,11 +40,11 @@ export function mountSidebar(app: App, parent: HTMLElement): Sidebar {
     h("header.topbar",
       h("div.brand", h("div.mark", { "aria-hidden": "true" }, "🔒"), h("div", h("h1", "Private Messenger"), h("div.sub", dot, connText))),
       h("div.controls", themeBtn,
-        h("button.btn.icon", { id: "btn-settings", type: "button", title: "Settings", "aria-label": "Settings", onclick: () => app.openSettings() }, icon("settings")))),
+        h("button.btn.icon", { id: "btn-settings", type: "button", title: "Settings", "aria-label": "Settings", "data-test": "settings-btn", onclick: () => app.openSettings() }, icon("settings")))),
     meCard,
     h("div.side-actions",
-      h("button.btn.primary", { id: "btn-new-chat", type: "button", onclick: () => app.openNewChat() }, icon("plus"), "New chat"),
-      h("button.btn", { id: "btn-new-group", type: "button", onclick: () => app.openNewGroup() }, icon("users"), "New group")),
+      h("button.btn.primary", { id: "btn-new-chat", type: "button", "data-test": "new-chat-btn", onclick: () => app.openNewChat() }, icon("plus"), "New chat"),
+      h("button.btn", { id: "btn-new-group", type: "button", "data-test": "new-group-btn", onclick: () => app.openNewGroup() }, icon("users"), "New group")),
     h("div.search", search),
     rooms, empty,
   );
@@ -61,7 +61,7 @@ export function mountSidebar(app: App, parent: HTMLElement): Sidebar {
       ? (c.kind === "group" ? `${typing.map((u) => app.nameOf(u).split(" ")[0]).join(", ")} typing…` : "typing…")
       : app.preview(c);
     const ts = c.lastMessage?.sentAt ?? c.updatedAt;
-    return h("button.room", { type: "button", "data-id": c.id, "aria-current": app.s.active === c.id ? "true" : "false" },
+    return h("button.room", { type: "button", "data-id": c.id, "data-test": "chat-item", "data-title": app.chatTitle(c), "aria-current": app.s.active === c.id ? "true" : "false" },
       app.avatarFor(c),
       h("div.body",
         h("div.rn", h("span", app.chatTitle(c)), c.unread ? h("span.badge", { "aria-label": `${c.unread} unread` }, String(c.unread)) : null),

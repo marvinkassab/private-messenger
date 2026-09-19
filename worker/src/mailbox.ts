@@ -8,7 +8,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { deliveryTokensMatch } from "./auth";
 import { getPushTransport, PUSH_DEBOUNCE_MS, sendWebPush, vapidConfigFromEnv } from "./push";
-import type { Env, Envelope, IncomingMessage, OneTimePreKey, PreKeyBundle, PushSubscription, SignedPreKey } from "./types";
+import type { Env, Envelope, IncomingMessage, OneTimePreKey, PqOneTimePreKey, PqSignedPreKey, PreKeyBundle, PushSubscription, SignedPreKey } from "./types";
 import { b64Decode, createIdGenerator } from "./util";
 
 export const MAX_ONE_TIME_PREKEYS = 200;
@@ -22,6 +22,9 @@ export interface RegisterInput {
   deliveryToken: string; // b64 32 bytes
   signedPreKey: SignedPreKey;
   oneTimePreKeys: OneTimePreKey[];
+  pqIdentityKey?: string;
+  pqSignedPreKey?: PqSignedPreKey;
+  pqOneTimePreKeys?: PqOneTimePreKey[];
 }
 
 export type SendResult = { status: "ok" } | { status: "unknown" } | { status: "forbidden" } | { status: "rate_limited" };
@@ -46,6 +49,11 @@ export class Mailbox extends DurableObject<Env> {
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS prekeys (
+        key_id INTEGER PRIMARY KEY,
+        public_key TEXT NOT NULL,
+        seq INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS pq_prekeys (
         key_id INTEGER PRIMARY KEY,
         public_key TEXT NOT NULL,
         seq INTEGER NOT NULL
@@ -107,6 +115,9 @@ export class Mailbox extends DurableObject<Env> {
       this.setMeta("signedPreKey", input.signedPreKey);
       this.setMeta("createdAt", Date.now());
       this.insertPreKeys(input.oneTimePreKeys);
+      if (input.pqIdentityKey) this.setMeta("pqIdentityKey", input.pqIdentityKey);
+      if (input.pqSignedPreKey) this.setMeta("pqSignedPreKey", input.pqSignedPreKey);
+      if (input.pqOneTimePreKeys?.length) this.insertPqPreKeys(input.pqOneTimePreKeys);
     });
     return true;
   }
@@ -124,6 +135,21 @@ export class Mailbox extends DurableObject<Env> {
     }
   }
 
+  private insertPqPreKeys(keys: PqOneTimePreKey[]): void {
+    for (const k of keys) {
+      this.sql.exec(
+        "INSERT INTO pq_prekeys (key_id, public_key, seq) VALUES (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM pq_prekeys)) " +
+          "ON CONFLICT(key_id) DO UPDATE SET public_key = excluded.public_key",
+        k.keyId,
+        k.publicKey,
+      );
+    }
+  }
+
+  async pqPreKeyCount(): Promise<number> {
+    return Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM pq_prekeys").one().n);
+  }
+
   async preKeyCount(): Promise<number> {
     return Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM prekeys").one().n);
   }
@@ -132,7 +158,11 @@ export class Mailbox extends DurableObject<Env> {
    * Replaces the signed prekey (keeping the previous one) and/or appends
    * one-time prekeys. The Worker has already checked the signature.
    */
-  async putKeys(signedPreKey: SignedPreKey | null, oneTimePreKeys: OneTimePreKey[]): Promise<{ count: number } | { error: "too_many" }> {
+  async putKeys(
+    signedPreKey: SignedPreKey | null,
+    oneTimePreKeys: OneTimePreKey[],
+    pq: { signedPreKey?: PqSignedPreKey | null; oneTimePreKeys?: PqOneTimePreKey[] } = {},
+  ): Promise<{ count: number; pqCount: number } | { error: "too_many" }> {
     return this.ctx.storage.transactionSync(() => {
       if (oneTimePreKeys.length > 0) {
         const existing = this.sql
@@ -149,7 +179,23 @@ export class Mailbox extends DurableObject<Env> {
         if (current && current.keyId !== signedPreKey.keyId) this.setMeta("previousSignedPreKey", current);
         this.setMeta("signedPreKey", signedPreKey);
       }
-      return { count: Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM prekeys").one().n) };
+      if (pq.oneTimePreKeys?.length) {
+        const ids = new Set(
+          this.sql.exec<{ key_id: number }>("SELECT key_id FROM pq_prekeys").toArray().map((r) => r.key_id),
+        );
+        for (const k of pq.oneTimePreKeys) ids.add(k.keyId);
+        if (ids.size > MAX_ONE_TIME_PREKEYS) return { error: "too_many" as const };
+        this.insertPqPreKeys(pq.oneTimePreKeys);
+      }
+      if (pq.signedPreKey) {
+        const current = this.getMeta<PqSignedPreKey>("pqSignedPreKey");
+        if (current && current.keyId !== pq.signedPreKey.keyId) this.setMeta("previousPqSignedPreKey", current);
+        this.setMeta("pqSignedPreKey", pq.signedPreKey);
+      }
+      return {
+        count: Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM prekeys").one().n),
+        pqCount: Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM pq_prekeys").one().n),
+      };
     });
   }
 
@@ -166,6 +212,19 @@ export class Mailbox extends DurableObject<Env> {
     if (row) {
       this.sql.exec("DELETE FROM prekeys WHERE key_id = ?", row.key_id);
       bundle.preKey = { keyId: row.key_id, publicKey: row.public_key };
+    }
+    const pqIdentityKey = this.getMeta<string>("pqIdentityKey");
+    const pqSignedPreKey = this.getMeta<PqSignedPreKey>("pqSignedPreKey");
+    if (pqIdentityKey && pqSignedPreKey) {
+      bundle.pqIdentityKey = pqIdentityKey;
+      bundle.pqSignedPreKey = pqSignedPreKey;
+      const pqRow = this.sql
+        .exec<{ key_id: number; public_key: string }>("SELECT key_id, public_key FROM pq_prekeys ORDER BY seq ASC LIMIT 1")
+        .toArray()[0];
+      if (pqRow) {
+        this.sql.exec("DELETE FROM pq_prekeys WHERE key_id = ?", pqRow.key_id);
+        bundle.pqPreKey = { keyId: pqRow.key_id, publicKey: pqRow.public_key };
+      }
     }
     return bundle;
   }

@@ -24,7 +24,7 @@ describe("prekeys", () => {
     expect(b3.signedPreKey).toEqual(b1.signedPreKey);
 
     const count = await (await api(bob, "GET", "/v1/keys/count")).json<any>();
-    expect(count).toEqual({ oneTimePreKeyCount: 0 });
+    expect(count).toMatchObject({ oneTimePreKeyCount: 0 });
   });
 
   it("404 for an unknown user", async () => {
@@ -42,19 +42,19 @@ describe("prekeys", () => {
 
   it("counts and tops up one-time prekeys, capping at 200", async () => {
     const bob = await registerUser("bob", { prekeys: 10 });
-    expect(await (await api(bob, "GET", "/v1/keys/count")).json()).toEqual({ oneTimePreKeyCount: 10 });
+    expect(await (await api(bob, "GET", "/v1/keys/count")).json()).toMatchObject({ oneTimePreKeyCount: 10 });
 
     const up = await api(bob, "PUT", "/v1/keys", { oneTimePreKeys: await makeOneTimePreKeys(90, 11) });
     expect(up.status).toBe(200);
-    expect(await up.json()).toEqual({ oneTimePreKeyCount: 100 });
+    expect(await up.json()).toMatchObject({ oneTimePreKeyCount: 100 });
 
     const tooMany = await api(bob, "PUT", "/v1/keys", { oneTimePreKeys: await makeOneTimePreKeys(101, 101) });
     expect(tooMany.status).toBe(400);
-    expect(await (await api(bob, "GET", "/v1/keys/count")).json()).toEqual({ oneTimePreKeyCount: 100 });
+    expect(await (await api(bob, "GET", "/v1/keys/count")).json()).toMatchObject({ oneTimePreKeyCount: 100 });
 
     const exact = await api(bob, "PUT", "/v1/keys", { oneTimePreKeys: await makeOneTimePreKeys(100, 101) });
     expect(exact.status).toBe(200);
-    expect(await exact.json()).toEqual({ oneTimePreKeyCount: 200 });
+    expect(await exact.json()).toMatchObject({ oneTimePreKeyCount: 200 });
   });
 
   it("rotates the signed prekey and rejects a bad signature", async () => {

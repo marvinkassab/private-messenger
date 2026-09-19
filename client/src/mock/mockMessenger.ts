@@ -226,7 +226,7 @@ export function createMockMessenger(): Messenger {
     await sleep(450);
     if (!messages.has(m.id)) return;
     m.status = "delivered"; store(m);
-    if (silent || chat.leftOrRemoved) return;
+    if (silent || chat.group?.leftOrRemoved) return;
     await sleep(300);
     setTypingUsers(chat.id, [responder]);
     await sleep(200);
@@ -339,7 +339,7 @@ export function createMockMessenger(): Messenger {
       requireAccount();
       const chat = chats.get(chatId);
       if (!chat) throw new Error("No such chat");
-      if (chat.leftOrRemoved) throw new Error("You are no longer a member of this group.");
+      if (chat.group?.leftOrRemoved) throw new Error("You are no longer a member of this group.");
       const peer = chat.kind === "direct" ? contacts.get(chat.members[0]) : undefined;
       if (peer?.identityChanged) throw new Error(`${peer.displayName || peer.username}'s safety number changed. Accept it before sending.`);
       const now = Date.now();
@@ -358,7 +358,7 @@ export function createMockMessenger(): Messenger {
         setTimeout(() => {
           const g = chat.group!;
           g.members = g.members.filter((u) => u !== me()); g.revision++;
-          chat.members = g.members; chat.leftOrRemoved = true;
+          chat.members = g.members; g.leftOrRemoved = true;
           systemLine(chatId, "Alice removed you from the group");
         }, 800);
         void simulatePeer(m, true);
@@ -371,7 +371,7 @@ export function createMockMessenger(): Messenger {
       requireAccount();
       const chat = chats.get(chatId);
       if (!chat) throw new Error("No such chat");
-      if (chat.leftOrRemoved) throw new Error("You are no longer a member of this group.");
+      if (chat.group?.leftOrRemoved) throw new Error("You are no longer a member of this group.");
       const id = newId();
       blobs.set(id, file);
       const meta: AttachmentMeta = { id, mime: file.type || "application/octet-stream", size: file.size, name: opts.name ?? (file as File).name, caption: opts.caption };
@@ -495,7 +495,7 @@ export function createMockMessenger(): Messenger {
       g.admins = g.admins.filter((u) => u !== me());
       g.revision++;
       chat.members = g.members;
-      chat.leftOrRemoved = true;
+      g.leftOrRemoved = true;
       systemLine(chat.id, "You left the group");
       emit({ type: "chat", chat: { ...chat } });
     },

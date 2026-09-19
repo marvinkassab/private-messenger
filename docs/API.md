@@ -13,8 +13,9 @@ values are **standard base64** strings.
 
 - `Mailbox` Durable Object, one per username, named with `idFromName(username)`.
   Holds: identity key, registration id, delivery token, signed prekey,
-  one-time prekeys, the envelope queue, the push subscription, and any live
-  WebSocket connections (hibernation API). SQLite-backed storage.
+  one-time prekeys, the ML-DSA identity key and ML-KEM prekeys, the envelope
+  queue, the push subscription, and any live WebSocket connections
+  (hibernation API). SQLite-backed storage.
 - `Invite` Durable Object, one per invite code, named with `idFromName(code)`.
   Holds creator, expiry, and whether it was used.
 - R2 bucket `ATTACHMENTS` for encrypted blobs. Key = attachment id.
@@ -88,6 +89,27 @@ Signed with the new identity key (see above). Body:
 }
 ```
 
+The post-quantum half (see [POSTQUANTUM.md](POSTQUANTUM.md)) is optional at
+the API level but sent by every current client:
+
+```json
+{
+  "pqIdentityKey": "<b64 ML-DSA-65 public key, 1952 bytes>",
+  "pqSignedPreKey": { "keyId": 1, "publicKey": "<b64 ML-KEM-1024, 1568>",
+                      "signature": "<b64 XEdDSA, 64>",
+                      "pqSignature": "<b64 ML-DSA-65, 3309>" },
+  "pqOneTimePreKeys": [ { "keyId": 1, "publicKey": "<b64 ML-KEM-1024>" }, ... ]
+}
+```
+
+It is **all-or-nothing**: sending `pqIdentityKey` without `pqSignedPreKey`
+(or either without the other, or one-time keys without an identity) is a 400.
+A half-upgraded account would be indistinguishable from a downgrade attack,
+so the server refuses to create one. The server checks lengths and verifies
+the XEdDSA `signature` over the ML-KEM public key under the classical
+identity key; it does not verify `pqSignature`, which is the receiving
+client's job.
+
 Rules: `username` matches `^[a-z0-9_]{3,32}$`; the invite code must exist,
 be unexpired and unused (or equal `BOOTSTRAP_INVITE`); the signed prekey's
 signature must verify under `identityKey`. On success the invite is marked
@@ -103,9 +125,18 @@ prekey if any remain.
   "username": "bob", "deviceId": 1,
   "identityKey": "<b64>", "registrationId": 4242,
   "signedPreKey": { "keyId": 1, "publicKey": "<b64>", "signature": "<b64>" },
-  "preKey": { "keyId": 17, "publicKey": "<b64>" }        // may be absent
+  "preKey": { "keyId": 17, "publicKey": "<b64>" },       // may be absent
+  "pqIdentityKey": "<b64>",                              // absent for a pre-PQ account
+  "pqSignedPreKey": { "keyId": 1, "publicKey": "<b64>",
+                      "signature": "<b64>", "pqSignature": "<b64>" },
+  "pqPreKey": { "keyId": 17, "publicKey": "<b64>" }      // may be absent
 }
 ```
+
+One ML-KEM one-time prekey is consumed per fetch, independently of the
+classical one. When the post-quantum fields are absent the account predates
+the layer; a client that has previously seen them for this contact treats
+their absence as a downgrade and refuses.
 
 404 if the user does not exist. Rate limit: 60 bundle fetches per minute per
 requesting user.
@@ -115,15 +146,17 @@ requesting user.
 Replace the signed prekey and/or append one-time prekeys.
 
 ```json
-{ "signedPreKey": { ... }, "oneTimePreKeys": [ ... ] }   // either optional
+{ "signedPreKey": { ... }, "oneTimePreKeys": [ ... ],
+  "pqSignedPreKey": { ... }, "pqOneTimePreKeys": [ ... ] }   // all optional
 ```
 
-Response `{ "oneTimePreKeyCount": 87 }`. The server keeps at most 200
+Response `{ "oneTimePreKeyCount": 87, "pqOneTimePreKeyCount": 87 }`. The server keeps at most 200
 one-time prekeys; extra ones are rejected with 400.
 
 ### GET /v1/keys/count   (auth)
 
-`{ "oneTimePreKeyCount": 87 }` so the client can top up below 20.
+`{ "oneTimePreKeyCount": 87, "pqOneTimePreKeyCount": 87 }` so the client can
+top up either stock when it falls below 20.
 
 ### PUT /v1/profile   (auth)
 

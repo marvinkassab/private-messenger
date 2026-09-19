@@ -5,11 +5,20 @@ export const $ = <T extends Element = HTMLElement>(sel: string, root: ParentNode
 type Child = Node | string | null | undefined | false | Child[];
 type Attrs = Record<string, string | number | boolean | null | undefined | ((e: any) => void)>;
 
+/* Pulls the plain tag name out of a "tag.class.class#id" string at the type
+   level, so h("button.btn.primary", ...) still returns an HTMLButtonElement
+   instead of the generic union HTMLElementTagNameMap[keyof ...]. The "#id"
+   suffix can follow any class, so it is stripped first. */
+type StripId<T extends string> = T extends `${infer Head}#${string}` ? Head : T;
+type BareTag<T extends string> = StripId<T> extends `${infer Head}.${string}` ? Head : StripId<T>;
+type ElementFor<T extends string> = BareTag<T> extends keyof HTMLElementTagNameMap ? HTMLElementTagNameMap[BareTag<T>] : HTMLElement;
+
 /* h("button.btn.primary#send", { onclick, title }, "Send") */
-export function h<K extends keyof HTMLElementTagNameMap>(tag: K | string, attrs?: Attrs | Child, ...children: Child[]): HTMLElementTagNameMap[K] {
-  const [name, ...classes] = tag.split(".");
-  const [base, id] = name.split("#");
-  const el = document.createElement(base || "div") as HTMLElementTagNameMap[K];
+export function h<T extends string>(tag: T, attrs?: Attrs | Child, ...children: Child[]): ElementFor<T> {
+  const hashAt = tag.indexOf("#");
+  const id = hashAt >= 0 ? tag.slice(hashAt + 1) : "";
+  const [base, ...classes] = (hashAt >= 0 ? tag.slice(0, hashAt) : tag).split(".");
+  const el = document.createElement(base || "div") as ElementFor<T>;
   if (id) el.id = id;
   if (classes.length) el.className = classes.join(" ");
   if (attrs && typeof attrs === "object" && !(attrs instanceof Node) && !Array.isArray(attrs)) {

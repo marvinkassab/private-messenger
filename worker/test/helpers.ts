@@ -1,6 +1,8 @@
 // Test helpers: real Curve25519 identities, signed exactly as docs/API.md says.
 
 import { Curve25519Wrapper } from "@privacyresearch/curve25519-typescript";
+import { ml_kem1024 } from "@noble/post-quantum/ml-kem.js";
+import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
 import { SELF } from "cloudflare:test";
 import { b64Encode, hexEncode, sha256Hex, utf8 } from "../src/util";
 
@@ -116,7 +118,45 @@ export async function makeOneTimePreKeys(count: number, firstId = 1) {
   return out;
 }
 
-export async function registerBody(id: Identity, opts: { invite?: string; prekeys?: number; registrationId?: number } = {}) {
+/* ---- post-quantum key material (docs/POSTQUANTUM.md) ---- */
+
+/** A real ML-DSA-65 identity, cached per test user. */
+export function makePqIdentity() {
+  return ml_dsa65.keygen();
+}
+
+/** A real ML-KEM-1024 signed prekey, signed under both identity keys. */
+export async function makePqSignedPreKey(id: Identity, pqId: { secretKey: Uint8Array }, keyId: number) {
+  const kp = ml_kem1024.keygen();
+  const sig = await xeddsaSign(id.privKey, kp.publicKey);
+  const pqSig = ml_dsa65.sign(kp.publicKey, pqId.secretKey);
+  return {
+    keyId,
+    publicKey: b64Encode(kp.publicKey),
+    signature: b64Encode(sig),
+    pqSignature: b64Encode(pqSig),
+  };
+}
+
+export function makePqOneTimePreKeys(count: number, firstId = 1) {
+  const out = [];
+  for (let i = 0; i < count; i++) out.push({ keyId: firstId + i, publicKey: b64Encode(ml_kem1024.keygen().publicKey) });
+  return out;
+}
+
+/** The whole post-quantum half of a registration or key top-up. */
+export async function pqHalf(id: Identity, pqId: ReturnType<typeof makePqIdentity>, opts: { prekeys?: number; firstId?: number; keyId?: number } = {}) {
+  return {
+    pqIdentityKey: b64Encode(pqId.publicKey),
+    pqSignedPreKey: await makePqSignedPreKey(id, pqId, opts.keyId ?? 1),
+    pqOneTimePreKeys: makePqOneTimePreKeys(opts.prekeys ?? 3, opts.firstId ?? 1),
+  };
+}
+
+export async function registerBody(
+  id: Identity,
+  opts: { invite?: string; prekeys?: number; registrationId?: number; pq?: Record<string, unknown> } = {},
+) {
   return {
     username: id.username,
     inviteCode: opts.invite ?? BOOTSTRAP,
@@ -125,6 +165,7 @@ export async function registerBody(id: Identity, opts: { invite?: string; prekey
     deliveryToken: id.deliveryTokenB64,
     signedPreKey: await makeSignedPreKey(id, 1),
     oneTimePreKeys: await makeOneTimePreKeys(opts.prekeys ?? 5),
+    ...(opts.pq ?? {}),
   };
 }
 
@@ -135,7 +176,7 @@ export function uniqueName(prefix: string): string {
 }
 
 /** Creates and registers a fresh user via the bootstrap invite. */
-export async function registerUser(prefix = "user", opts: { prekeys?: number; invite?: string } = {}): Promise<Identity> {
+export async function registerUser(prefix = "user", opts: { prekeys?: number; invite?: string; pq?: Record<string, unknown> } = {}): Promise<Identity> {
   const id = await makeIdentity(uniqueName(prefix));
   const res = await api(id, "POST", "/v1/register", await registerBody(id, opts));
   if (res.status !== 201) throw new Error(`register failed: ${res.status} ${await res.text()}`);

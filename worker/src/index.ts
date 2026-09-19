@@ -14,7 +14,18 @@ import {
 import { Invite } from "./invite";
 import { Mailbox, MAX_ONE_TIME_PREKEYS } from "./mailbox";
 import { isValidSubscription } from "./push";
-import { ApiError, type Env, type IncomingMessage, type OneTimePreKey, type SignedPreKey } from "./types";
+import {
+  ML_DSA_65_PUBLIC,
+  ML_DSA_65_SIGNATURE,
+  ML_KEM_1024_PUBLIC,
+  ApiError,
+  type Env,
+  type IncomingMessage,
+  type OneTimePreKey,
+  type PqOneTimePreKey,
+  type PqSignedPreKey,
+  type SignedPreKey,
+} from "./types";
 import { b64Decode, constantTimeEqual, isEnvelopeId, isPositiveInt, isValidUsername, randomHex, sha256Hex, utf8 } from "./util";
 
 export { Mailbox, Invite };
@@ -186,6 +197,75 @@ async function validateSignedPreKey(v: unknown, identityKey: Uint8Array): Promis
   return { keyId: s.keyId, publicKey: s.publicKey as string, signature: s.signature as string };
 }
 
+/* Post-quantum prekeys (docs/POSTQUANTUM.md). The server checks lengths and
+   the XEdDSA signature binding the ML-KEM public key to the classical identity
+   key; that is enough to stop a server-side swap. ML-DSA verification is the
+   client's job. */
+function validatePqOneTimePreKeys(v: unknown, max: number): PqOneTimePreKey[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) throw new ApiError(400, "bad_request", "pqOneTimePreKeys must be an array");
+  if (v.length > max) throw new ApiError(400, "bad_request", `at most ${max} post-quantum one-time prekeys`);
+  const out: PqOneTimePreKey[] = [];
+  const seen = new Set<number>();
+  for (const k of v) {
+    if (!k || typeof k !== "object" || !isPositiveInt(k.keyId) || !decodeKey(k.publicKey, ML_KEM_1024_PUBLIC)) {
+      throw new ApiError(400, "bad_request", "invalid post-quantum one-time prekey");
+    }
+    if (seen.has(k.keyId)) throw new ApiError(400, "bad_request", "duplicate post-quantum prekey id");
+    seen.add(k.keyId);
+    out.push({ keyId: k.keyId, publicKey: k.publicKey });
+  }
+  return out;
+}
+
+async function validatePqSignedPreKey(v: unknown, identityKey: Uint8Array): Promise<PqSignedPreKey> {
+  if (!v || typeof v !== "object") throw new ApiError(400, "bad_request", "pqSignedPreKey must be an object");
+  const s = v as Record<string, unknown>;
+  const pub = decodeKey(s.publicKey, ML_KEM_1024_PUBLIC);
+  const sig = decodeKey(s.signature, 64);
+  const pqSig = decodeKey(s.pqSignature, ML_DSA_65_SIGNATURE);
+  if (!isPositiveInt(s.keyId) || !pub || !sig || !pqSig) {
+    throw new ApiError(400, "bad_request", "invalid pqSignedPreKey");
+  }
+  if (!(await verifyIdentitySignature(identityKey, pub, sig))) {
+    throw new ApiError(400, "bad_signature", "pqSignedPreKey signature does not verify under identityKey");
+  }
+  return {
+    keyId: s.keyId,
+    publicKey: s.publicKey as string,
+    signature: s.signature as string,
+    pqSignature: s.pqSignature as string,
+  };
+}
+
+/* The post-quantum half is all-or-nothing: a client that sends an ML-DSA
+   identity must also send a signed ML-KEM prekey, so a bundle can never be
+   half-upgraded. */
+async function validatePqHalf(
+  b: Record<string, unknown>,
+  identityKey: Uint8Array,
+  max: number,
+): Promise<{ pqIdentityKey?: string; pqSignedPreKey?: PqSignedPreKey; pqOneTimePreKeys: PqOneTimePreKey[] }> {
+  const hasIdentity = b.pqIdentityKey !== undefined;
+  const hasSigned = b.pqSignedPreKey !== undefined;
+  if (hasIdentity !== hasSigned) {
+    throw new ApiError(400, "bad_request", "pqIdentityKey and pqSignedPreKey must be sent together");
+  }
+  const pqOneTimePreKeys = validatePqOneTimePreKeys(b.pqOneTimePreKeys, max);
+  if (!hasIdentity) {
+    if (pqOneTimePreKeys.length) throw new ApiError(400, "bad_request", "pqOneTimePreKeys need a pqIdentityKey");
+    return { pqOneTimePreKeys: [] };
+  }
+  if (!decodeKey(b.pqIdentityKey, ML_DSA_65_PUBLIC)) {
+    throw new ApiError(400, "bad_request", `pqIdentityKey must be ${ML_DSA_65_PUBLIC} bytes (ML-DSA-65)`);
+  }
+  return {
+    pqIdentityKey: b.pqIdentityKey as string,
+    pqSignedPreKey: await validatePqSignedPreKey(b.pqSignedPreKey, identityKey),
+    pqOneTimePreKeys,
+  };
+}
+
 function validateMessages(body: Record<string, unknown>): { messages: IncomingMessage[]; timestamp: number } {
   const messages = body.messages;
   if (!Array.isArray(messages) || messages.length === 0) throw new ApiError(400, "bad_request", "messages must be a non-empty array");
@@ -234,6 +314,7 @@ route("POST", "/v1/register", async (c) => {
 
   const signedPreKey = await validateSignedPreKey(b.signedPreKey, identityKey);
   const oneTimePreKeys = validateOneTimePreKeys(b.oneTimePreKeys, MAX_PREKEYS_PER_REGISTER);
+  const pq = await validatePqHalf(b, identityKey, MAX_PREKEYS_PER_REGISTER);
 
   const mailbox = mailboxFor(c.env, b.username);
   if (await mailbox.exists()) throw new ApiError(409, "username_taken", "username is already registered");
@@ -253,6 +334,9 @@ route("POST", "/v1/register", async (c) => {
     deliveryToken: b.deliveryToken as string,
     signedPreKey,
     oneTimePreKeys,
+    pqIdentityKey: pq.pqIdentityKey,
+    pqSignedPreKey: pq.pqSignedPreKey,
+    pqOneTimePreKeys: pq.pqOneTimePreKeys,
   });
   if (!created) {
     if (invite) await invite.release(b.username);
@@ -263,7 +347,10 @@ route("POST", "/v1/register", async (c) => {
 
 route("GET", "/v1/keys/count", async (c) => {
   const { mailbox } = await requireAuth(c, new Uint8Array(0));
-  return json(200, { oneTimePreKeyCount: await mailbox.preKeyCount() });
+  return json(200, {
+    oneTimePreKeyCount: await mailbox.preKeyCount(),
+    pqOneTimePreKeyCount: await mailbox.pqPreKeyCount(),
+  });
 });
 
 route("GET", "/v1/keys/:username", async (c) => {
@@ -282,9 +369,11 @@ route("PUT", "/v1/keys", async (c) => {
   const b = parseJson(body);
   const signedPreKey = b.signedPreKey === undefined ? null : await validateSignedPreKey(b.signedPreKey, identityKey);
   const oneTimePreKeys = validateOneTimePreKeys(b.oneTimePreKeys, MAX_ONE_TIME_PREKEYS);
-  const result = await mailbox.putKeys(signedPreKey, oneTimePreKeys);
+  const pqSignedPreKey = b.pqSignedPreKey === undefined ? null : await validatePqSignedPreKey(b.pqSignedPreKey, identityKey);
+  const pqOneTimePreKeys = validatePqOneTimePreKeys(b.pqOneTimePreKeys, MAX_ONE_TIME_PREKEYS);
+  const result = await mailbox.putKeys(signedPreKey, oneTimePreKeys, { signedPreKey: pqSignedPreKey, oneTimePreKeys: pqOneTimePreKeys });
   if ("error" in result) throw new ApiError(400, "too_many_prekeys", `the server keeps at most ${MAX_ONE_TIME_PREKEYS} one-time prekeys`);
-  return json(200, { oneTimePreKeyCount: result.count });
+  return json(200, { oneTimePreKeyCount: result.count, pqOneTimePreKeyCount: result.pqCount });
 });
 
 route("PUT", "/v1/profile", async (c) => {
