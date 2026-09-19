@@ -2,7 +2,8 @@
    into the interface from ../types. See docs/PROTOCOL.md and docs/API.md for the wire
    contract this file implements. */
 
-import { FingerprintGenerator, type KeyPairType } from "@privacyresearch/libsignal-protocol-typescript";
+import { type KeyPairType } from "@privacyresearch/libsignal-protocol-typescript";
+import { safetyNumberFor } from "./fingerprint";
 import type {
   Account,
   AttachmentMeta,
@@ -420,8 +421,16 @@ export class MessengerImpl implements Messenger {
     const localKp = await this.signalStore.getIdentityKeyPair();
     if (!localKp) throw new Error("no local identity");
     const theirKey = (await this.signalStore.getTrustedIdentity(username)) ?? b64Decode(c.identityKeyB64);
-    const fp = new FingerprintGenerator(5200);
-    const digits = await fp.createFor(this.acct.username, toArrayBuffer(localKp.pubKey), username, toArrayBuffer(theirKey));
+    /* Our own implementation of the library's algorithm, verified identical in
+       test/core/fingerprint.test.ts. The library's routes 5,200 SHA-512 rounds
+       through a JavaScript crypto polyfill one awaited promise at a time, which
+       measured 43 seconds in a browser; this takes milliseconds. */
+    const digits = safetyNumberFor(
+      this.acct.username,
+      new Uint8Array(localKp.pubKey),
+      username,
+      new Uint8Array(theirKey),
+    );
     return { digits, verified: c.verified, identityChanged: !!c.identityChanged };
   }
 

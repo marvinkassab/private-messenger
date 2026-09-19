@@ -11,6 +11,7 @@
     "test:ui": "node test/ui/smoke.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@privacyresearch/libsignal-protocol-typescript": "^0.0.16"
   },
   "devDependencies": {
