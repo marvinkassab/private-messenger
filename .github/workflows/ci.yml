@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install (worker)
+        run: cd worker && npm install --legacy-peer-deps
+      - name: Install (client)
+        run: cd client && npm install --legacy-peer-deps
+      - name: Typecheck and test (worker)
+        run: cd worker && npm run typecheck && npm test
+      - name: Typecheck, build and test (client)
+        run: cd client && npm run build && npm test
