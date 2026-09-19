@@ -168,10 +168,14 @@ top up either stock when it falls below 20.
 {
   "messages": [
     { "destinationDeviceId": 1, "type": 3, "content": "<b64 ciphertext>" }
-  ],
-  "timestamp": 1758240000000
+  ]
 }
 ```
+
+There is deliberately **no `timestamp` field**. When a message was written is
+carried inside the ciphertext, where only the recipient can read it; accepting
+it here as well would give the operator a plaintext clock on every message. A
+client that sends one anyway is not rejected, it is ignored.
 
 `type` is the Signal message type: `3` = PreKeyWhisperMessage (first message
 of a session), `1` = WhisperMessage. `content` is the serialized Signal
@@ -202,17 +206,23 @@ Acknowledge (delete) one envelope. Idempotent.
 
 ```json
 {
-  "id": "01J8...",                  // ULID-like, sortable
+  "id": "0000000002XKQ8...",        // sequence number + random padding, sortable
   "from": { "username": "alice", "deviceId": 1 },   // absent for unidentified sends
   "type": 3,
-  "content": "<b64>",
-  "timestamp": 1758240000000,       // sender-supplied
-  "serverTimestamp": 1758240000123
+  "content": "<b64>"
 }
 ```
 
-Queue limits: 1,000 envelopes per user, oldest dropped; envelopes older than
-30 days are deleted.
+An envelope carries **no time of any kind**. The id is a per-mailbox sequence
+number followed by random characters: it sorts in arrival order, which is all
+the queue needs, and encodes no wall clock. (It was a ULID, whose leading
+characters *are* the creation time in milliseconds. That was a clock on every
+message and is gone.)
+
+Queue limits: 1,000 envelopes per user, oldest dropped. For expiry the
+Durable Object keeps one coarse **day number** per row, never returned to any
+client, so envelopes older than 30 days can be swept; day granularity is the
+least precision that still allows cleanup.
 
 ### WebSocket /v1/ws?u=&d=&ts=&sig=
 

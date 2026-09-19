@@ -58,13 +58,17 @@ export interface PreKeyBundle {
   pqPreKey?: PqOneTimePreKey;
 }
 
+/**
+ * A queued message. Deliberately carries no time of any kind: the id is a
+ * clockless sequence, and the moment a message was written lives inside the
+ * ciphertext where only the recipient can read it. The operator of this server
+ * cannot tell when anything was sent.
+ */
 export interface Envelope {
   id: string;
   from?: { username: string; deviceId: number };
   type: number;
   content: string;
-  timestamp: number;
-  serverTimestamp: number;
 }
 
 export interface IncomingMessage {

@@ -73,52 +73,45 @@ export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-// ---- ULID-like sortable ids ----
+// ---- sortable, clockless envelope ids ----
 // 26 chars of Crockford base32: 48-bit millisecond timestamp + 80 bits of randomness.
 // The generator is monotonic within one process: ids created in the same
 // millisecond increment the random part so ORDER BY id is insertion order.
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-export function createIdGenerator(): (now?: number) => string {
-  let lastTime = -1;
-  let lastRandom = new Uint8Array(10);
-  return (now = Date.now()) => {
-    if (now <= lastTime) {
-      now = lastTime;
-      // increment the 80-bit random part (big endian)
-      for (let i = 9; i >= 0; i--) {
-        lastRandom[i] = (lastRandom[i] + 1) & 0xff;
-        if (lastRandom[i] !== 0) break;
-      }
-    } else {
-      lastTime = now;
-      lastRandom = crypto.getRandomValues(new Uint8Array(10));
-    }
-    return encodeTime(now) + encodeRandom(lastRandom);
-  };
-}
+/**
+ * Envelope ids.
+ *
+ * These were ULIDs, whose leading characters encode the creation time to the
+ * millisecond. That put an arrival clock on every message even with the
+ * timestamp columns removed, so ids are now a per-mailbox sequence number
+ * followed by random padding: they still sort in arrival order, which is all
+ * the queue needs, but carry no wall-clock information.
+ */
+const ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const SEQ_CHARS = 10;
+const RANDOM_CHARS = 16;
 
-function encodeTime(ms: number): string {
-  let s = "";
-  let t = ms;
-  for (let i = 0; i < 10; i++) {
-    s = CROCKFORD[t % 32] + s;
-    t = Math.floor(t / 32);
+function encodeSeq(seq: number): string {
+  let n = BigInt(seq);
+  let out = "";
+  for (let i = 0; i < SEQ_CHARS; i++) {
+    out = ID_ALPHABET[Number(n % 32n)] + out;
+    n /= 32n;
   }
-  return s;
+  return out;
 }
 
 function encodeRandom(bytes: Uint8Array): string {
-  // 80 bits -> 16 chars of 5 bits
-  let bits = 0n;
-  for (const b of bytes) bits = (bits << 8n) | BigInt(b);
-  let s = "";
-  for (let i = 0; i < 16; i++) {
-    s = CROCKFORD[Number(bits & 31n)] + s;
-    bits >>= 5n;
-  }
-  return s;
+  let out = "";
+  for (let i = 0; i < RANDOM_CHARS; i++) out += ID_ALPHABET[bytes[i] & 31];
+  return out;
+}
+
+/** Builds an id generator over a caller-supplied, monotonically rising seq. */
+export function createIdGenerator(): (seq: number) => string {
+  return (seq: number) => encodeSeq(seq) + encodeRandom(crypto.getRandomValues(new Uint8Array(RANDOM_CHARS)));
 }
 
 export const newId = createIdGenerator();

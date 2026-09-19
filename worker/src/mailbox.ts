@@ -13,7 +13,7 @@ import { b64Decode, createIdGenerator } from "./util";
 
 export const MAX_ONE_TIME_PREKEYS = 200;
 export const MAX_QUEUE = 1000;
-export const ENVELOPE_TTL_MS = 30 * 24 * 3600 * 1000;
+export const ENVELOPE_TTL_DAYS = 30;
 export const DRAIN_LIMIT = 100;
 
 export interface RegisterInput {
@@ -35,8 +35,8 @@ type EnvelopeRow = {
   from_device: number | null;
   type: number;
   content: string;
-  timestamp: number;
-  server_timestamp: number;
+  seq: number;
+  day: number;
 };
 
 export class Mailbox extends DurableObject<Env> {
@@ -64,10 +64,11 @@ export class Mailbox extends DurableObject<Env> {
         from_device INTEGER,
         type INTEGER NOT NULL,
         content TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        server_timestamp INTEGER NOT NULL
+        seq INTEGER NOT NULL,
+        day INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS envelopes_server_ts ON envelopes (server_timestamp);
+      CREATE INDEX IF NOT EXISTS envelopes_seq ON envelopes (seq);
+      CREATE INDEX IF NOT EXISTS envelopes_day ON envelopes (day);
       CREATE TABLE IF NOT EXISTS counters (
         kind TEXT NOT NULL,
         win INTEGER NOT NULL,
@@ -113,7 +114,6 @@ export class Mailbox extends DurableObject<Env> {
       this.setMeta("registrationId", input.registrationId);
       this.setMeta("deliveryToken", input.deliveryToken);
       this.setMeta("signedPreKey", input.signedPreKey);
-      this.setMeta("createdAt", Date.now());
       this.insertPreKeys(input.oneTimePreKeys);
       if (input.pqIdentityKey) this.setMeta("pqIdentityKey", input.pqIdentityKey);
       if (input.pqSignedPreKey) this.setMeta("pqSignedPreKey", input.pqSignedPreKey);
@@ -262,40 +262,52 @@ export class Mailbox extends DurableObject<Env> {
    * Identified send: the Worker has already authenticated `from` and applied
    * the sender's rate limit.
    */
-  async enqueue(from: { username: string; deviceId: number } | null, messages: IncomingMessage[], timestamp: number): Promise<SendResult> {
+  async enqueue(from: { username: string; deviceId: number } | null, messages: IncomingMessage[]): Promise<SendResult> {
     if (!(await this.exists())) return { status: "unknown" };
-    this.store(from, messages, timestamp);
+    this.store(from, messages);
     return { status: "ok" };
   }
 
   /** Unidentified send: checks the delivery token and the recipient-side rate limit. */
-  async unidentifiedSend(token: Uint8Array, messages: IncomingMessage[], timestamp: number): Promise<SendResult> {
+  async unidentifiedSend(token: Uint8Array, messages: IncomingMessage[]): Promise<SendResult> {
     if (!(await this.exists())) return { status: "unknown" };
     const storedB64 = this.getMeta<string>("deliveryToken");
     const stored = storedB64 ? b64Decode(storedB64) : null;
     if (!deliveryTokensMatch(token, stored)) return { status: "forbidden" };
     if (!(await this.bump("recv", 300, 60))) return { status: "rate_limited" };
-    this.store(null, messages, timestamp);
+    this.store(null, messages);
     return { status: "ok" };
   }
 
-  private store(from: { username: string; deviceId: number } | null, messages: IncomingMessage[], timestamp: number): void {
-    const serverTimestamp = Date.now();
+  /** Day number, the only time value kept, and only so stale rows can be swept. */
+  private today(): number {
+    return Math.floor(Date.now() / 86400000);
+  }
+
+  private nextSeq(): number {
+    const seq = (this.getMeta<number>("seq") ?? 0) + 1;
+    this.setMeta("seq", seq);
+    return seq;
+  }
+
+  private store(from: { username: string; deviceId: number } | null, messages: IncomingMessage[]): void {
+    const day = this.today();
     const envelopes: Envelope[] = [];
     this.ctx.storage.transactionSync(() => {
-      this.prune(serverTimestamp);
+      this.prune();
       for (const m of messages) {
-        const env: Envelope = { id: this.newId(serverTimestamp), type: m.type, content: m.content, timestamp, serverTimestamp };
+        const seq = this.nextSeq();
+        const env: Envelope = { id: this.newId(seq), type: m.type, content: m.content };
         if (from) env.from = { username: from.username, deviceId: from.deviceId };
         this.sql.exec(
-          "INSERT INTO envelopes (id, from_username, from_device, type, content, timestamp, server_timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO envelopes (id, from_username, from_device, type, content, seq, day) VALUES (?, ?, ?, ?, ?, ?, ?)",
           env.id,
           from ? from.username : null,
           from ? from.deviceId : null,
           env.type,
           env.content,
-          env.timestamp,
-          env.serverTimestamp,
+          seq,
+          day,
         );
         envelopes.push(env);
       }
@@ -306,16 +318,16 @@ export class Mailbox extends DurableObject<Env> {
       }
     });
     const delivered = this.broadcast(envelopes);
-    if (!delivered) this.maybePush(serverTimestamp);
+    if (!delivered) this.maybePush(Date.now());
   }
 
   /** Deletes envelopes past their 30-day lifetime. */
-  private prune(now = Date.now()): void {
-    this.sql.exec("DELETE FROM envelopes WHERE server_timestamp < ?", now - ENVELOPE_TTL_MS);
+  private prune(): void {
+    this.sql.exec("DELETE FROM envelopes WHERE day < ?", this.today() - ENVELOPE_TTL_DAYS);
   }
 
   private rowToEnvelope(r: EnvelopeRow): Envelope {
-    const env: Envelope = { id: r.id, type: r.type, content: r.content, timestamp: r.timestamp, serverTimestamp: r.server_timestamp };
+    const env: Envelope = { id: r.id, type: r.type, content: r.content };
     if (r.from_username !== null) env.from = { username: r.from_username, deviceId: r.from_device ?? 1 };
     return env;
   }

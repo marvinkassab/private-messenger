@@ -26,20 +26,51 @@ no accounts to buy, and a server that never sees a word.
         └──────────── Web Push (empty payload, VAPID) ────────────────────────────────┘
 ```
 
-## What the server can and cannot see
+## What you, running this, can and cannot see
 
-Everything that leaves a device is Signal ciphertext. The server stores and
-forwards it; it cannot read it, and neither can Cloudflare.
+You will operate the server, so the honest question is not "is it encrypted"
+but "what could you hand over if someone made you". The answer is kept as
+close to nothing as a working messenger allows.
 
-| The server knows | The server does not know |
+**The server stores no clock of any kind.** Not the time a message was sent,
+not the time it arrived, not when an account was created. Message ids used to
+be ULIDs, whose leading characters encode the creation time to the
+millisecond; they are now a sequence number with random padding, so ordering
+still works and the time does not survive anywhere. Eight tests in
+`worker/test/nometadata.test.ts` exist solely to keep it that way.
+
+| You can see | You cannot see |
 | --- | --- |
-| Usernames and their public keys | Any message text, photo, file, reaction, or group name |
-| That an envelope was queued for user X, and when | Who sent it, once two people are in contact (sealed sender) |
-| Envelope sizes | Who is in which group, or that groups exist at all |
-| Push subscriptions and IP addresses | Display names, safety-number checks, anything about contacts |
+| Usernames and their public keys | Any message, photo, file, reaction, or group name |
+| That a mailbox holds *n* undelivered envelopes | When anything was written, sent, or read |
+| Roughly how large those envelopes are | Who sent them, once two people are in contact |
+| | Who is in which group, or that groups exist at all |
+| | Display names, contacts, or verification state |
 
-The first message between two people is sent identified so they can swap
-delivery tokens; every message after that is sealed.
+Messages are deleted the moment the recipient acknowledges them. The history
+of a conversation exists only on the participants' own devices, in their
+browser's encrypted storage, exactly like the portfolio tracker's holdings.
+Nothing accumulates on the server for you to lose or be asked for.
+
+### What still cannot be hidden, and why
+
+Being straight about the limits matters more than the table above:
+
+- **IP addresses.** Anything a device connects to sees where it connected
+  from. Cloudflare's own edge logs exist regardless of what this code does.
+  A user who cares should use a VPN or Tor.
+- **Traffic timing.** You do not store when a message arrived, but a party
+  watching the network as it happens sees the connection. Removing that needs
+  cover traffic and batching, which costs battery and delay; it is not here.
+- **Push endpoints**, for anyone who enables notifications. That is a URL
+  issued by Apple or Google identifying a device. It is stored only if the
+  user turns push on, and the push itself carries no content.
+- **The fact that an account exists.** Usernames and public keys have to be
+  visible or nobody could start a conversation.
+
+The only way to remove the first two is to not run the transport at all. If
+that matters more than reliability, the same client can be pointed at public
+relays instead, and then nobody runs a server, including you.
 
 ## How it works, briefly
 

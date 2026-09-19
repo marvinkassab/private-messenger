@@ -266,14 +266,14 @@ async function validatePqHalf(
   };
 }
 
-function validateMessages(body: Record<string, unknown>): { messages: IncomingMessage[]; timestamp: number } {
+/* No `timestamp` field is accepted. The time a message was written belongs
+   inside the ciphertext, where the server cannot read it; taking it here as
+   well would hand the operator a plaintext clock on every message. A client
+   that still sends one is not rejected, it is simply ignored. */
+function validateMessages(body: Record<string, unknown>): { messages: IncomingMessage[] } {
   const messages = body.messages;
   if (!Array.isArray(messages) || messages.length === 0) throw new ApiError(400, "bad_request", "messages must be a non-empty array");
   if (messages.length > MAX_MESSAGES_PER_SEND) throw new ApiError(400, "bad_request", "too many messages");
-  const timestamp = body.timestamp;
-  if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp < 0) {
-    throw new ApiError(400, "bad_request", "timestamp must be a number");
-  }
   const out: IncomingMessage[] = [];
   for (const m of messages) {
     if (!m || typeof m !== "object") throw new ApiError(400, "bad_request", "invalid message");
@@ -286,7 +286,7 @@ function validateMessages(body: Record<string, unknown>): { messages: IncomingMe
     if (bytes.length > MAX_CONTENT_BYTES) throw new ApiError(413, "too_large", "content exceeds 64 KB");
     out.push({ destinationDeviceId: 1, type: m.type, content: m.content });
   }
-  return { messages: out, timestamp: Math.floor(timestamp) };
+  return { messages: out };
 }
 
 // ---------------------------------------------------------------------------
@@ -395,15 +395,15 @@ route("POST", "/v1/messages/:username", async (c) => {
   if (unidentified !== null && c.request.headers.get("Authorization") === null) {
     const token = parseUnidentifiedAccess(unidentified);
     if (!token) throw new ApiError(403, "forbidden", "invalid Unidentified-Access token");
-    const { messages, timestamp } = validateMessages(parseJson(body));
-    const result = await recipientBox.unidentifiedSend(token, messages, timestamp);
+    const { messages } = validateMessages(parseJson(body));
+    const result = await recipientBox.unidentifiedSend(token, messages);
     return sendResult(result);
   }
 
   const { auth, mailbox } = await requireAuth(c, body);
-  const { messages, timestamp } = validateMessages(parseJson(body));
+  const { messages } = validateMessages(parseJson(body));
   if (!(await mailbox.bump("send", 300, 60))) throw new ApiError(429, "rate_limited", "too many sends");
-  const result = await recipientBox.enqueue({ username: auth.username, deviceId: auth.deviceId }, messages, timestamp);
+  const result = await recipientBox.enqueue({ username: auth.username, deviceId: auth.deviceId }, messages);
   return sendResult(result);
 });
 

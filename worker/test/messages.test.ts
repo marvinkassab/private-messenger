@@ -27,8 +27,12 @@ describe("messages over HTTP", () => {
     expect(env.from).toEqual({ username: alice.username, deviceId: 1 });
     expect(env.type).toBe(3);
     expect(env.content).toBe(content);
-    expect(env.timestamp).toBe(ts);
-    expect(env.serverTimestamp).toBeGreaterThanOrEqual(ts - 1000);
+    // The server keeps no clock: no timestamp is stored, returned, or
+    // recoverable from the id. When a message was written lives inside the
+    // ciphertext, where the operator cannot read it.
+    expect(env.timestamp).toBeUndefined();
+    expect(env.serverTimestamp).toBeUndefined();
+    expect(Object.keys(env).sort()).toEqual(["content", "from", "id", "type"]);
 
     // still queued until acked
     const again = await (await api(bob, "GET", "/v1/messages")).json<any>();
