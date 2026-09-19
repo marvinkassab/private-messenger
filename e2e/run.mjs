@@ -170,8 +170,11 @@ try {
   await alice.reload();
   await S.openChat(alice, "bob");
   check(await S.seesText(alice, "rides the ratchet"), "Alice's history survives a reload");
+  // Bob was last looking at the group; send from his direct chat with Alice,
+  // or this goes to the group and Alice never sees it in the chat she has open.
+  await S.openChat(bob, "alice");
   await S.sendText(bob, "after your reload");
-  check(await S.seesText(alice, "after your reload"), "session survives a reload");
+  check(await S.seesText(alice, "after your reload"), "the session survives a reload and new messages still arrive");
 
   await alice.screenshot({ path: path.join(SHOTS, "desktop.png") });
   const mob = await person("mobile", { width: 390, height: 780 });
