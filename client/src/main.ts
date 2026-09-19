@@ -11,8 +11,14 @@ async function createMessengerInstance(): Promise<Messenger> {
     return createMockMessenger();
   }
   const { createMessenger } = await import("./core/index");
+  /* The Worker serves this page as well as the API, so by default the server
+     is wherever the app was loaded from. That needs no configuration and
+     makes every request same-origin. VITE_API_URL is only for the cases where
+     they are apart: the dev server, or the app hosted somewhere else. */
+  const sameOrigin = location.origin;
+  const baseUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8787" : sameOrigin);
   return createMessenger({
-    baseUrl: import.meta.env.VITE_API_URL || "http://127.0.0.1:8787",
+    baseUrl,
     appUrl: location.origin + location.pathname,
   });
 }

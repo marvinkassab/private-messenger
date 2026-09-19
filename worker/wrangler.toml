@@ -7,9 +7,21 @@ compatibility_flags = ["nodejs_compat"]
 # below, and the R2 binding if it is bound there rather than here.
 keep_vars = true
 
-# Where the client is served from. Edit this to your Pages URL and push; the
-# deploy follows the push. A browser origin not listed here is refused by
-# CORS, so the app would load and then fail to reach the server.
+# The app itself, served by this same Worker from the client's build output.
+#
+# One project rather than two: there is no separate Pages site to create, wire
+# up or keep in step, and because the app and the API share an origin there is
+# no cross-origin request to allow in the first place. `run_worker_first`
+# lists the paths the Worker must handle; everything else is a static file,
+# and anything not found falls back to index.html so deep links work.
+[assets]
+directory = "../client/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/v1/*"]
+
+# Only needed if the app is ever served from somewhere else, such as a
+# separate Pages site or a local dev server. Same-origin requests send no
+# Origin header to match, so this stays empty in the normal setup.
 [vars]
 ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 

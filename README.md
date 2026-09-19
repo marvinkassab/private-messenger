@@ -161,6 +161,9 @@ repository, then set:
 | Build command | `npm run build` |
 | Deploy command | `npx wrangler deploy` |
 
+The build command builds the app into `client/dist`, which the Worker then
+serves alongside the API.
+
 The root directory matters. Left at `/`, the build runs the *client's* build
 with none of its dependencies installed, and wrangler finds no config, which
 is exactly how the first attempt fails. Pointed at `worker`, all three
@@ -196,32 +199,22 @@ node -e "const k=require('crypto').generateKeyPairSync('ec',{namedCurve:'prime25
 `keep_vars` is set in `worker/wrangler.toml`, so later deploys leave these
 secrets, and anything else configured in the dashboard, untouched.
 
-### 3. The client (the app)
+### 3. That is it
 
-**Workers & Pages → Create → Pages → Connect to Git**, choose the same
-repository, then set:
+The Worker serves the app as well as the API, from the same address. There is
+no second project to create, no separate site to keep in step, and because the
+app and the server share an origin there is no cross-origin request to permit.
 
-| Field | Value |
-| --- | --- |
-| Framework preset | None |
-| Build command | `cd client && npm install && npm run build` |
-| Build output directory | `client/dist` |
-| Environment variable | `VITE_API_URL` = the Worker URL from step 2 |
+Open the Worker's URL and the app is there.
 
-### 4. Let the two halves find each other
+`ALLOWED_ORIGINS` in `worker/wrangler.toml` only matters if you ever serve the
+app from somewhere else, such as a local dev server. Same-origin requests send
+no origin to check, so the default is fine.
 
-Edit `ALLOWED_ORIGINS` in `worker/wrangler.toml` to your Pages URL, for
-example `https://private-messenger.pages.dev`, commit and push. The Worker
-redeploys itself. A browser origin not listed there is refused, so the app
-would load and then fail to reach the server.
+### 4. Optional: a nicer address
 
-Optionally add a custom domain to the Pages project, such as
-`chat.yourdomain.com`, and list that too.
-
-From here on, the whole pipeline is one `git push`: the tests run on GitHub,
-and Cloudflare rebuilds and deploys both halves. The deploy finishes a little
-after the push returns, on Cloudflare's side, so a new build can take a reload
-or two to reach a phone.
+Under the Worker's **Settings → Domains & Routes**, add a custom domain such
+as `chat.yourdomain.com`. Nothing in the repository needs to change.
 
 ### 5. First users
 

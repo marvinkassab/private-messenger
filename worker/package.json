@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "build": "echo 'No build step: wrangler compiles the Worker during deploy.'",
+    "build": "cd ../client && npm install && npm run build",
     "dev": "wrangler dev --local --port 8787",
     "deploy": "wrangler deploy",
     "test": "vitest run",

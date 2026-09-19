@@ -18,10 +18,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(path.join(ROOT, "client", "package.json"));
 const { chromium } = require("playwright");
 
+/* One origin, because that is what deploys: the Worker serves the app as well
+   as the API. Testing them on two ports would exercise a topology nobody
+   runs, and would hide any same-origin assumption the app makes. */
 const WORKER_PORT = 8791;
-const CLIENT_PORT = 4180;
 const API = `http://127.0.0.1:${WORKER_PORT}`;
-const APP = `http://127.0.0.1:${CLIENT_PORT}/`;
+const APP = `${API}/`;
 const BOOTSTRAP = "e2e-bootstrap-invite";
 const SHOTS = path.join(ROOT, "e2e", "screenshots");
 fs.mkdirSync(SHOTS, { recursive: true });
@@ -90,18 +92,16 @@ const STATE = fs.mkdtempSync(path.join(os.tmpdir(), "pm-e2e-state-"));
 fs.writeFileSync(path.join(ROOT, "worker", ".dev.vars"),
   `BOOTSTRAP_INVITE=${BOOTSTRAP}\nALLOWED_ORIGINS=${APP.replace(/\/$/, "")}\nVAPID_SUBJECT=mailto:e2e@example.com\n`);
 await requireFreePort(WORKER_PORT, "worker");
-await requireFreePort(CLIENT_PORT, "client preview server");
+// The Worker serves client/dist, so the app is built before it starts. No
+// VITE_API_URL: the app should find the server at its own origin.
+await sh(path.join(ROOT, "client", "node_modules", ".bin", "vite"), ["build"], path.join(ROOT, "client"));
+console.log("client built");
 run(path.join(ROOT, "worker", "node_modules", ".bin", "wrangler"),
     ["dev", "--local", "--port", String(WORKER_PORT), "--persist-to", STATE],
     path.join(ROOT, "worker"));
 await waitFor(`${API}/v1/health`);
-console.log("worker up");
-await sh(path.join(ROOT, "client", "node_modules", ".bin", "vite"), ["build", "--outDir", "dist-e2e"], path.join(ROOT, "client"), { VITE_API_URL: API });
-run(path.join(ROOT, "client", "node_modules", ".bin", "vite"),
-    ["preview", "--outDir", "dist-e2e", "--port", String(CLIENT_PORT), "--strictPort"],
-    path.join(ROOT, "client"));
 await waitFor(APP);
-console.log("client up");
+console.log("worker up, serving both the API and the app");
 
 const exe = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined);
 const browser = await chromium.launch(exe ? { executablePath: exe } : {});
