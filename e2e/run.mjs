@@ -134,7 +134,8 @@ try {
 
   const bob2 = await person("bob-dup");
   await bob2.goto(APP);
-  const err = await S.registerExpectError(bob2, { username: "bob", invite: BOOTSTRAP, name: "Bob again" });
+  const dupInvite = await S.mintInvite(alice);
+  const err = await S.registerExpectError(bob2, { username: "bob", invite: dupInvite.code, name: "Bob again" });
   check(/taken|exists|already|registered|409/i.test(err), "duplicate username is refused (" + err + ")");
 
   await S.addContact(alice, "bob");

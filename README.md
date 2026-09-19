@@ -225,10 +225,20 @@ or two to reach a phone.
 
 ### 5. First users
 
-Open the site, register with `BOOTSTRAP_INVITE` as the invite code, then mint
-invites from Settings for everyone else and send them the links. When
-everyone is in, delete the `BOOTSTRAP_INVITE` secret in the dashboard so
-nobody else can register with it.
+Open the site and register with `BOOTSTRAP_INVITE` as the invite code. That
+is how the first account exists at all, since everyone else needs an invite
+from someone already in.
+
+**It works exactly once.** After your account exists the code is spent, and a
+second attempt is refused. That is deliberate: it used to be accepted forever
+while the secret was set, which made it a permanent way into your server for
+anyone who ever saw it. If you need another first-account code, because the
+first registration went to the wrong account or you lost it before making a
+backup, change the `BOOTSTRAP_INVITE` secret in the dashboard; a different
+value is a fresh unused code.
+
+Once you are in, mint invites from Settings for everyone else and send them
+the links. When they are all in, delete the secret entirely.
 
 ### If the repository connection is ever removed
 

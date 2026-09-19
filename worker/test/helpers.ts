@@ -159,7 +159,7 @@ export async function registerBody(
 ) {
   return {
     username: id.username,
-    inviteCode: opts.invite ?? BOOTSTRAP,
+    inviteCode: opts.invite ?? (await nextInvite()),
     identityKey: id.identityKeyB64,
     registrationId: opts.registrationId ?? 4242,
     deliveryToken: id.deliveryTokenB64,
@@ -175,9 +175,66 @@ export function uniqueName(prefix: string): string {
   return `${prefix}_${hexEncode(crypto.getRandomValues(new Uint8Array(3)))}${counter}`;
 }
 
-/** Creates and registers a fresh user via the bootstrap invite. */
-export async function registerUser(prefix = "user", opts: { prekeys?: number; invite?: string; pq?: Record<string, unknown> } = {}): Promise<Identity> {
+/* The bootstrap code is single-use, like every other invite, so only the
+   first account in a test can use it. Everyone after that is invited by that
+   first account, which is also how a real network grows.
+
+   Storage is isolated per test, so the bootstrap code is unused again at the
+   start of each one. That is the signal used here: when bootstrap succeeds we
+   are in a fresh test and that user becomes the inviter; when it is refused as
+   already used we are later in the same test and mint from the inviter we
+   already have. */
+let inviter: Identity | null = null;
+
+/** Lets a test that spends the bootstrap code itself nominate the inviter. */
+export function setInviter(id: Identity): void {
+  inviter = id;
+}
+
+/**
+ * An invite code that can be used right now: the bootstrap code while it is
+ * still unclaimed, otherwise a freshly minted one. For tests that build the
+ * registration body themselves instead of going through `registerUser`.
+ */
+export async function nextInvite(): Promise<string> {
+  if (inviter) {
+    const minted = await api(inviter, "POST", "/v1/invites");
+    if (minted.status === 201) return (await minted.json<{ code: string }>()).code;
+    // Storage is isolated per test, so between tests the remembered inviter
+    // no longer exists. That is the signal to start again from bootstrap.
+    inviter = null;
+  }
+
+  /* Spend the single-use bootstrap code on a root account that exists only to
+     invite the accounts a test actually cares about. Doing it here rather than
+     letting the first test account claim it means every test gets an invite,
+     however it chooses to register. */
+  const root = await makeIdentity(uniqueName("root"));
+  const body = {
+    username: root.username,
+    inviteCode: BOOTSTRAP,
+    identityKey: root.identityKeyB64,
+    registrationId: 4242,
+    deliveryToken: root.deliveryTokenB64,
+    signedPreKey: await makeSignedPreKey(root, 1),
+    oneTimePreKeys: await makeOneTimePreKeys(1),
+  };
+  const res = await api(root, "POST", "/v1/register", body);
+  if (res.status !== 201) throw new Error(`bootstrap failed: ${res.status} ${await res.text()}`);
+  inviter = root;
+
+  const minted = await api(root, "POST", "/v1/invites");
+  if (minted.status !== 201) throw new Error(`mint failed: ${minted.status} ${await minted.text()}`);
+  return (await minted.json<{ code: string }>()).code;
+}
+
+/** Creates and registers a fresh user, bootstrapping or being invited. */
+export async function registerUser(
+  prefix = "user",
+  opts: { prekeys?: number; invite?: string; pq?: Record<string, unknown> } = {},
+): Promise<Identity> {
   const id = await makeIdentity(uniqueName(prefix));
+
   const res = await api(id, "POST", "/v1/register", await registerBody(id, opts));
   if (res.status !== 201) throw new Error(`register failed: ${res.status} ${await res.text()}`);
   return id;

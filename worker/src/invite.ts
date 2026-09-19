@@ -33,6 +33,32 @@ export class Invite extends DurableObject<Env> {
     return { expiresAt: rec.expiresAt };
   }
 
+  /**
+   * Claims the bootstrap code, creating its record on first use.
+   *
+   * The bootstrap code is the one invite nobody mints: it comes from a secret
+   * so the very first account can exist at all. It used to be accepted every
+   * time the secret was set, which made it a permanent skeleton key to the
+   * whole server for anyone who ever saw it. Now it is claimed exactly once,
+   * like any other invite, and the operator gets a fresh one by rotating the
+   * secret. It never expires before use, since there is nobody to re-issue it.
+   */
+  async claimBootstrap(username: string, now = Date.now()): Promise<ClaimResult> {
+    const existing = await this.load();
+    if (existing) {
+      return existing.usedBy !== null ? { ok: false, reason: "used" } : this.claim(username, now);
+    }
+    const rec: InviteRecord = {
+      creator: "bootstrap",
+      createdAt: now,
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      usedBy: username,
+      usedAt: now,
+    };
+    await this.ctx.storage.put("invite", rec);
+    return { ok: true };
+  }
+
   /** Atomically marks the invite used by `username`. */
   async claim(username: string, now = Date.now()): Promise<ClaimResult> {
     const rec = await this.load();

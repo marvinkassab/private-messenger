@@ -335,13 +335,25 @@ route("POST", "/v1/register", async (c) => {
   const mailbox = mailboxFor(c.env, b.username);
   if (await mailbox.exists()) throw new ApiError(409, "username_taken", "username is already registered");
 
-  // Claim the invite (atomic inside the Invite object), or accept the bootstrap code.
+  /* Claim the invite, atomically inside the Invite object.
+   *
+   * The bootstrap code goes through the same single-use path, under a name
+   * derived from the code itself so that rotating the secret issues a fresh
+   * one. Previously it bypassed claiming entirely, which made it a permanent
+   * skeleton key: anyone who ever learned it could keep creating accounts
+   * until the operator remembered to delete the secret. */
   const bootstrap = c.env.BOOTSTRAP_INVITE;
   const isBootstrap = !!bootstrap && constantTimeEqual(utf8(b.inviteCode), utf8(bootstrap));
-  const invite = isBootstrap ? null : c.env.INVITE.get(c.env.INVITE.idFromName(b.inviteCode));
-  if (invite) {
-    const claim = await invite.claim(b.username);
-    if (!claim.ok) throw new ApiError(403, "invite_invalid", `invite code is ${claim.reason}`);
+  const inviteName = isBootstrap
+    ? "bootstrap:" + (await sha256Hex(utf8(bootstrap!)))
+    : b.inviteCode;
+  const invite = c.env.INVITE.get(c.env.INVITE.idFromName(inviteName));
+  const claim = isBootstrap ? await invite.claimBootstrap(b.username) : await invite.claim(b.username);
+  if (!claim.ok) {
+    const why = isBootstrap && claim.reason === "used"
+      ? "the first-account code has already been used; ask someone already in for an invite"
+      : `invite code is ${claim.reason}`;
+    throw new ApiError(403, "invite_invalid", why);
   }
 
   const created = await mailbox.register({
@@ -355,7 +367,7 @@ route("POST", "/v1/register", async (c) => {
     pqOneTimePreKeys: pq.pqOneTimePreKeys,
   });
   if (!created) {
-    if (invite) await invite.release(b.username);
+    await invite.release(b.username);
     throw new ApiError(409, "username_taken", "username is already registered");
   }
   return json(201, { username: b.username, deviceId: 1 });

@@ -1,7 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { b64Encode } from "../src/util";
-import { api, authHeader, BASE, BOOTSTRAP, encodeBody, makeIdentity, makeSignedPreKey, registerBody, registerUser, uniqueName } from "./helpers";
+import { api, authHeader, BASE, BOOTSTRAP, encodeBody, makeIdentity, makeSignedPreKey, registerBody, registerUser, setInviter, uniqueName } from "./helpers";
 
 describe("health and CORS", () => {
   it("GET /v1/health", async () => {
@@ -47,8 +47,27 @@ describe("POST /v1/register", () => {
   it("registers with the bootstrap invite", async () => {
     const id = await makeIdentity(uniqueName("reg"));
     const res = await api(id, "POST", "/v1/register", await registerBody(id, { invite: BOOTSTRAP }));
+    // The bootstrap code is single-use, so this test spends it. Everyone
+    // registered later in this file is invited by the account it created.
+    setInviter(id);
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ username: id.username, deviceId: 1 });
+  });
+
+  it("the bootstrap code works once and then never again", async () => {
+    // It used to be accepted every time the secret was set, which made it a
+    // permanent skeleton key to the whole server for anyone who saw it.
+    const second = await makeIdentity(uniqueName("second"));
+    const res = await api(second, "POST", "/v1/register", await registerBody(second, { invite: BOOTSTRAP }));
+    expect(res.status).toBe(403);
+    const body = await res.json<any>();
+    expect(body.error).toBe("invite_invalid");
+    expect(body.message).toMatch(/already been used/i);
+
+    // And the refusal is real: no account was created.
+    const alice = await registerUser("alice");
+    const bundle = await api(alice, "GET", `/v1/keys/${second.username}`);
+    expect(bundle.status).toBe(404);
   });
 
   it("rejects an unknown invite with 403", async () => {
