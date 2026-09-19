@@ -149,11 +149,11 @@ export interface PreKeyBundleWire {
   signedPreKey: { keyId: number; publicKey: string; signature: string };
   preKey?: { keyId: number; publicKey: string };
 }
+/* Carries no time of any kind: the server stores none, and when a message was
+   written lives inside the ciphertext. The id is a sortable sequence. */
 export interface EnvelopeWire {
   id: string;
   from?: { username: Username; deviceId: number };
   type: number;                         // 1 whisper, 3 prekey, 4 sealed
   content: string;
-  timestamp: number;
-  serverTimestamp: number;
 }

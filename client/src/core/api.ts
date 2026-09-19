@@ -176,14 +176,17 @@ export class ApiClient {
     return this.json("PUT", "/v1/profile", { body: { deliveryToken } });
   }
 
+  /* No timestamp is sent. When a message was written travels inside the
+     ciphertext, where only the recipient can read it; putting it in the
+     request body as well would leak a plaintext clock to the server and to
+     anything watching the connection. */
   sendMessages(
     username: string,
     messages: OutgoingMessage[],
-    timestamp: number,
     unidentifiedToken?: string,
   ): Promise<{ needsSync: boolean }> {
     return this.json("POST", `/v1/messages/${encodeURIComponent(username)}`, {
-      body: { messages, timestamp },
+      body: { messages },
       unidentifiedToken,
     });
   }

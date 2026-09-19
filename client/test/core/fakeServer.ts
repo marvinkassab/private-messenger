@@ -182,16 +182,20 @@ export class FakeServer {
 
   /* ---------- internals ---------- */
 
+  /* Mirrors the real server: a sequence number with random padding and no
+     clock anywhere in it. Putting Date.now() here, as an earlier version did,
+     would let these tests pass while the real wire format leaked a timestamp. */
   private nextEnvelopeId(): string {
     this.counter += 1;
-    return `${Date.now().toString(36)}-${String(this.counter).padStart(8, "0")}`;
+    const random = Array.from({ length: 8 }, () => Math.floor(Math.random() * 36).toString(36)).join("");
+    return `${String(this.counter).padStart(10, "0")}${random}`;
   }
 
-  private async deliver(to: string, from: { username: string; deviceId: number } | undefined, type: number, content: string, timestamp: number): Promise<void> {
+  private async deliver(to: string, from: { username: string; deviceId: number } | undefined, type: number, content: string): Promise<void> {
     const mb = this.mailboxes.get(to);
     if (!mb) throw new HttpError(404, "not_found", "unknown recipient");
     if (content.length > 64 * 1024) throw new HttpError(413, "too_large", "message too large");
-    const env: EnvelopeWire = { id: this.nextEnvelopeId(), from, type, content, timestamp, serverTimestamp: Date.now() };
+    const env: EnvelopeWire = { id: this.nextEnvelopeId(), from, type, content };
     mb.queue.push(env);
     if (mb.queue.length > 1000) mb.queue.shift();
     const log = this.sentTo.get(to) ?? [];
@@ -349,7 +353,7 @@ export class FakeServer {
     }
     const body = JSON.parse(utf8Decode(bodyBytes)) as { messages: Array<{ destinationDeviceId: number; type: number; content: string }>; timestamp: number };
     for (const m of body.messages) {
-      await this.deliver(targetUsername, from, m.type, m.content, body.timestamp);
+      await this.deliver(targetUsername, from, m.type, m.content);
     }
     return json(200, { needsSync: false });
   }

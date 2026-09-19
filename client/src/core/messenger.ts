@@ -489,14 +489,13 @@ export class MessengerImpl implements Messenger {
     } catch (e) {
       throw this.wrapIdentityError(to, e);
     }
-    const timestamp = content.ts;
     if (!opts.forceIdentified && contact?.hasDeliveryToken && contact.deliveryToken) {
       const theirIdentity = await this.signalStore.getTrustedIdentity(to);
       if (!theirIdentity) throw new Error(`no trusted identity for ${to}`);
       const sealed = await sealMessage(theirIdentity, { from: this.me(), deviceId: DEVICE_ID, type: cipher.type, content: cipher.content });
-      await this.api.sendMessages(to, [{ destinationDeviceId: DEVICE_ID, type: SEALED_TYPE, content: sealed }], timestamp, contact.deliveryToken);
+      await this.api.sendMessages(to, [{ destinationDeviceId: DEVICE_ID, type: SEALED_TYPE, content: sealed }], contact.deliveryToken);
     } else {
-      await this.api.sendMessages(to, [{ destinationDeviceId: DEVICE_ID, type: cipher.type, content: cipher.content }], timestamp);
+      await this.api.sendMessages(to, [{ destinationDeviceId: DEVICE_ID, type: cipher.type, content: cipher.content }]);
     }
   }
 
