@@ -23,9 +23,17 @@ bindings = [
 tag = "v1"
 new_sqlite_classes = ["Mailbox", "Invite"]
 
-[[r2_buckets]]
-binding = "ATTACHMENTS"
-bucket_name = "private-messenger-attachments"
+# Attachment storage. Commented out so the Worker deploys before R2 is set
+# up: a deploy that fails because one bucket does not exist yet helps nobody,
+# and without this messaging, groups and everything else still work while
+# photos and files are refused with a message saying why.
+#
+# To turn attachments on: create an R2 bucket named exactly
+# private-messenger-attachments, uncomment these three lines, and push.
+#
+# [[r2_buckets]]
+# binding = "ATTACHMENTS"
+# bucket_name = "private-messenger-attachments"
 
 # Secrets live only in the Cloudflare dashboard, never in this repository:
 #   VAPID_PUBLIC_KEY   VAPID_PRIVATE_KEY   VAPID_SUBJECT   BOOTSTRAP_INVITE

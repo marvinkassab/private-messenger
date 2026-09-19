@@ -12,6 +12,26 @@ export function isAttachmentId(id: string): boolean {
   return ID_RE.test(id);
 }
 
+/**
+ * The bucket, or a 503 naming exactly what is missing.
+ *
+ * The binding is optional so the Worker can be deployed before R2 is set up:
+ * messages, groups and everything else work, and only attachments are
+ * refused. A deploy that fails outright because one bucket does not exist
+ * yet helps nobody.
+ */
+function bucket(env: Env): R2Bucket {
+  if (!env.ATTACHMENTS) {
+    throw new ApiError(
+      503,
+      "attachments_unavailable",
+      "Attachment storage is not configured on this server. Create an R2 bucket named " +
+        "'private-messenger-attachments' and redeploy; messaging works without it.",
+    );
+  }
+  return env.ATTACHMENTS;
+}
+
 export interface UploadResult {
   id: string;
   /** hex sha256 of the raw body, for the request signature */
@@ -59,7 +79,7 @@ export async function storeAttachment(request: Request, env: Env): Promise<Uploa
       buf.set(c, off);
       off += c.byteLength;
     }
-    await env.ATTACHMENTS.put(id, buf, { httpMetadata });
+    await bucket(env).put(id, buf, { httpMetadata });
     return { id, bodyHashHex: hash.digest("hex"), size };
   }
 
@@ -89,12 +109,12 @@ export async function storeAttachment(request: Request, env: Env): Promise<Uploa
       pipeError = e;
     });
   try {
-    await env.ATTACHMENTS.put(id, fixed.readable, { httpMetadata });
+    await bucket(env).put(id, fixed.readable, { httpMetadata });
     await piping;
     if (pipeError !== undefined) throw pipeError;
   } catch (e) {
     await piping;
-    await env.ATTACHMENTS.delete(id).catch(() => {});
+    await bucket(env).delete(id).catch(() => {});
     if (sizeError) throw sizeError;
     if (e instanceof ApiError) throw e;
     throw new ApiError(400, "bad_request", "upload failed: body did not match Content-Length");
@@ -103,12 +123,12 @@ export async function storeAttachment(request: Request, env: Env): Promise<Uploa
 }
 
 export async function deleteAttachment(env: Env, id: string): Promise<void> {
-  await env.ATTACHMENTS.delete(id);
+  await bucket(env).delete(id);
 }
 
 export async function getAttachment(env: Env, id: string): Promise<Response> {
   if (!isAttachmentId(id)) throw new ApiError(404, "not_found", "unknown attachment");
-  const obj = await env.ATTACHMENTS.get(id);
+  const obj = await bucket(env).get(id);
   if (!obj) throw new ApiError(404, "not_found", "unknown attachment");
   const headers = new Headers({
     "Content-Type": "application/octet-stream",

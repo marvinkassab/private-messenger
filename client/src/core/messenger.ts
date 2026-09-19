@@ -15,6 +15,7 @@ import type {
   Message,
   Messenger,
   MessengerEvent,
+  PreKeyBundleWire,
   SafetyNumber,
   Username,
 } from "../types";
@@ -63,6 +64,7 @@ import {
   aesGcmEncrypt,
   b64Decode,
   b64Encode,
+  concatBytes,
   deriveKeyBytes,
   fromJsonSafe,
   randomBytes,
@@ -383,6 +385,48 @@ export class MessengerImpl implements Messenger {
     });
   }
 
+  /* ---------- post-quantum key storage (docs/POSTQUANTUM.md) ----------
+   * Private halves live in the same encrypted stores the classical keys use, under key
+   * names that cannot collide with the classical (numeric-id) ones: the "identity" store
+   * gains "pqIdentityKeyPair", "signedPreKeys" gains "pq-signed", and "prekeys" gains one
+   * entry per one-time prekey named "pq:<keyId>". All three stores are already in
+   * ENCRYPTED_STORES (store.ts), so this material is covered by the app lock exactly like
+   * the classical identity/prekeys are. */
+
+  private async pqSaveIdentity(kp: PqKeyPair): Promise<void> {
+    await this.store.put("identity", "pqIdentityKeyPair", { publicKey: kp.publicKey, secretKey: kp.secretKey });
+  }
+
+  private async pqLoadIdentity(): Promise<PqKeyPair | undefined> {
+    return this.store.get<PqKeyPair>("identity", "pqIdentityKeyPair");
+  }
+
+  private async pqSaveSignedPreKey(entry: { keyId: number; publicKey: Uint8Array; secretKey: Uint8Array }): Promise<void> {
+    await this.store.put("signedPreKeys", "pq-signed", entry);
+  }
+
+  private async pqLoadSignedPreKey(): Promise<{ keyId: number; publicKey: Uint8Array; secretKey: Uint8Array } | undefined> {
+    return this.store.get("signedPreKeys", "pq-signed");
+  }
+
+  private async pqSaveOneTimePreKeys(entries: Array<{ keyId: number; publicKey: Uint8Array; secretKey: Uint8Array }>): Promise<void> {
+    for (const e of entries) await this.store.put("prekeys", `pq:${e.keyId}`, { publicKey: e.publicKey, secretKey: e.secretKey });
+  }
+
+  /** Loads and removes (consumes) one one-time prekey's secret; null if unknown or already used. */
+  private async pqTakeOneTimePreKey(keyId: number): Promise<Uint8Array | null> {
+    const rec = await this.store.get<{ publicKey: Uint8Array; secretKey: Uint8Array }>("prekeys", `pq:${keyId}`);
+    if (!rec) return null;
+    await this.store.delete("prekeys", `pq:${keyId}`);
+    return rec.secretKey;
+  }
+
+  private async mustClassicalIdentity(): Promise<{ privKey: ArrayBuffer; pubBytes: Uint8Array }> {
+    const kp = await this.signalStore.getIdentityKeyPair();
+    if (!kp) throw new Error("no local identity");
+    return { privKey: kp.privKey, pubBytes: new Uint8Array(kp.pubKey) };
+  }
+
   async register(username: Username, inviteCode: string, displayName: string): Promise<Account> {
     await this.store.open();
     if (this.locked) throw new Error("store is locked");
@@ -397,6 +441,21 @@ export class MessengerImpl implements Messenger {
     await this.store.put("kv", "nextPreKeyId", 101);
     const deliveryToken = randomBytes(32);
     await this.store.put("kv", "deliveryToken", b64Encode(deliveryToken));
+
+    // Post-quantum half (docs/POSTQUANTUM.md): generated unconditionally for every account.
+    const pqIdentity = generatePqIdentity();
+    await this.pqSaveIdentity(pqIdentity);
+    const pqSignedKeyId = 1;
+    const pqSignedPreKeyPair = generatePqPreKey();
+    await this.pqSaveSignedPreKey({ keyId: pqSignedKeyId, publicKey: pqSignedPreKeyPair.publicKey, secretKey: pqSignedPreKeyPair.secretKey });
+    // Bound by BOTH the classical identity (XEdDSA, same primitive the classical signed
+    // prekey uses) and the ML-DSA identity, per docs/POSTQUANTUM.md.
+    const pqClassicalSig = await xeddsaSign(identity.identityKeyPair.privKey, pqSignedPreKeyPair.publicKey);
+    const pqSig = signPqPreKey(pqSignedPreKeyPair.publicKey, pqIdentity.secretKey);
+    const pqOneTimeKeys = Array.from({ length: 100 }, (_, i) => ({ keyId: i + 1, ...generatePqPreKey() }));
+    await this.pqSaveOneTimePreKeys(pqOneTimeKeys);
+    await this.store.put("kv", "pqNextPreKeyId", 101);
+
     const acct: Account = {
       username,
       deviceId: DEVICE_ID,
@@ -416,6 +475,14 @@ export class MessengerImpl implements Messenger {
         deliveryToken: b64Encode(deliveryToken),
         signedPreKey: signedPreKeyWire(signedPreKey),
         oneTimePreKeys: preKeys.map(preKeyWire),
+        pqIdentityKey: b64Encode(pqIdentity.publicKey),
+        pqSignedPreKey: {
+          keyId: pqSignedKeyId,
+          publicKey: b64Encode(pqSignedPreKeyPair.publicKey),
+          signature: b64Encode(pqClassicalSig),
+          pqSignature: b64Encode(pqSig),
+        },
+        pqOneTimePreKeys: pqOneTimeKeys.map((k) => ({ keyId: k.keyId, publicKey: b64Encode(k.publicKey) })),
       });
     } catch (e) {
       this.acct = null;
@@ -494,14 +561,98 @@ export class MessengerImpl implements Messenger {
     return isIdentityChangedLibError(e) ? new IdentityChangedError(username) : (e as Error);
   }
 
+  /** Classical X3DH (via the Signal library) plus, when the bundle offers it, the post-quantum
+   *  hybrid session (docs/POSTQUANTUM.md "Session establishment"). Verifies the post-quantum
+   *  signed prekey under BOTH signatures, aborting on either failure; refuses a bundle that has
+   *  silently dropped post-quantum keys we previously saw for this contact (PqDowngradeError);
+   *  otherwise marks a contact who never had them "classical only". Returns the post-quantum
+   *  fields for the caller to fold into its own Contact upsert. */
+  private async establishSession(username: string, bundle: PreKeyBundleWire): Promise<{ pqIdentityKeyB64?: string; classicalOnly: boolean }> {
+    const contact = await this.store.get<StoredContact>("contacts", username);
+    const hadPq = !!contact?.pqIdentityKeyB64;
+    const bundleHasPq = !!(bundle.pqIdentityKey && bundle.pqSignedPreKey);
+
+    if (bundleHasPq) {
+      const classicalIdKey = b64Decode(bundle.identityKey);
+      const pqIdKey = b64Decode(bundle.pqIdentityKey!);
+      const spkPub = b64Decode(bundle.pqSignedPreKey!.publicKey);
+      const classicalOk = await xeddsaVerify(classicalIdKey, spkPub, b64Decode(bundle.pqSignedPreKey!.signature));
+      const pqOk = verifyPqPreKey(spkPub, b64Decode(bundle.pqSignedPreKey!.pqSignature), pqIdKey);
+      if (!classicalOk || !pqOk) throw new Error(`post-quantum signed prekey signature invalid for ${username}`);
+    } else if (hadPq) {
+      throw new PqDowngradeError(username);
+    }
+
+    await this.sessions.processBundle(bundle);
+
+    if (bundleHasPq) {
+      await this.setupPqSessionAsInitiator(username, bundle);
+      return { pqIdentityKeyB64: bundle.pqIdentityKey, classicalOnly: false };
+    }
+    return { classicalOnly: true };
+  }
+
+  /** Encapsulates to the peer's published post-quantum prekeys and derives the hybrid root
+   *  once per peer; a no-op if we already hold a session for them (re-fetching a bundle for an
+   *  already-open classical session must not burn another one-time prekey or re-derive the
+   *  root). See the "post-quantum hybrid layer" comment above for how `classicalSecret` is
+   *  bound in, and `pqSeal`/`deliverToUser` for when the opener actually goes out. */
+  private async setupPqSessionAsInitiator(username: string, bundle: PreKeyBundleWire): Promise<void> {
+    const key = pqSessionKey(username);
+    if (await this.store.get<PqPeerSession>("sessions", key)) return;
+    const pqIdentity = await this.pqLoadIdentity();
+    if (!pqIdentity) return; // we ourselves predate the layer; nothing to bind
+
+    const eph = await generateEphemeralKeyPair();
+    const peerClassicalIdentity = b64Decode(bundle.identityKey);
+    const classicalSecret = await classicalAgreement(peerClassicalIdentity, eph.privKey);
+    const peerSignedPreKeyPub = b64Decode(bundle.pqSignedPreKey!.publicKey);
+    const peerOneTimePub = bundle.pqPreKey ? b64Decode(bundle.pqPreKey.publicKey) : null;
+    const peerPqIdentityPub = b64Decode(bundle.pqIdentityKey!);
+
+    const { state, init } = initiatePqSession({
+      classicalSecret,
+      peerSignedPreKey: peerSignedPreKeyPub,
+      peerOneTimePreKey: peerOneTimePub,
+      initiatorIdentity: new Uint8Array(eph.pubKey),
+      responderIdentity: peerClassicalIdentity,
+      pqIdentities: concatBytes(pqIdentity.publicKey, peerPqIdentityPub),
+    });
+    // Seed the KEM ratchet: the peer's "current" key is what we just encapsulated to (their
+    // published signed prekey), so our own first re-key (should we send one first) targets it.
+    // See the pq.ts import comment in setupPqSessionAsInitiator's caller docs for why pq.ts
+    // itself leaves this null.
+    state.peerKemPublic = peerSignedPreKeyPub;
+
+    const peer: PqPeerSession = {
+      state: serializePqSession(state),
+      pendingInit: {
+        ctSignedB64: b64Encode(init.ctSigned),
+        ctOneTimeB64: init.ctOneTime ? b64Encode(init.ctOneTime) : null,
+        oneTimeKeyId: bundle.pqPreKey ? bundle.pqPreKey.keyId : null,
+        ephPubB64: b64Encode(eph.pubKey),
+      },
+    };
+    await this.store.put("sessions", key, peer);
+  }
+
   private async ensureSession(username: string): Promise<void> {
     if (await this.sessions.hasSession(username)) return;
     const bundle = await this.api.getBundle(username);
+    let pqInfo: { pqIdentityKeyB64?: string; classicalOnly: boolean };
     try {
-      await this.sessions.processBundle(bundle);
+      pqInfo = await this.establishSession(username, bundle);
     } catch (e) {
       throw this.wrapIdentityError(username, e);
     }
+    let contact = await this.store.get<StoredContact>("contacts", username);
+    if (!contact) {
+      contact = { username, verified: false, addedAt: Date.now(), hasDeliveryToken: false, identityKeyB64: bundle.identityKey };
+    }
+    if (pqInfo.pqIdentityKeyB64) contact.pqIdentityKeyB64 = pqInfo.pqIdentityKeyB64;
+    if (pqInfo.classicalOnly) contact.classicalOnly = true;
+    await this.store.put("contacts", username, contact);
+    this.emit({ type: "contact", contact: this.toPublicContact(contact) });
   }
 
   private async handleIdentityChange(username: string, newKey: Uint8Array): Promise<void> {
@@ -527,8 +678,9 @@ export class MessengerImpl implements Messenger {
     this.assertReady();
     if (username === this.me()) throw new Error("cannot add yourself as a contact");
     const bundle = await this.api.getBundle(username);
+    let pqInfo: { pqIdentityKeyB64?: string; classicalOnly: boolean };
     try {
-      await this.sessions.processBundle(bundle);
+      pqInfo = await this.establishSession(username, bundle);
     } catch (e) {
       throw this.wrapIdentityError(username, e);
     }
@@ -539,6 +691,8 @@ export class MessengerImpl implements Messenger {
     } else {
       contact.identityKeyB64 = bundle.identityKey;
     }
+    if (pqInfo.pqIdentityKeyB64) contact.pqIdentityKeyB64 = pqInfo.pqIdentityKeyB64;
+    if (pqInfo.classicalOnly) contact.classicalOnly = true;
     await this.store.put("contacts", username, contact);
     this.emit({ type: "contact", contact: this.toPublicContact(contact) });
 
@@ -581,11 +735,18 @@ export class MessengerImpl implements Messenger {
        test/core/fingerprint.test.ts. The library's routes 5,200 SHA-512 rounds
        through a JavaScript crypto polyfill one awaited promise at a time, which
        measured 43 seconds in a browser; this takes milliseconds. */
+    // docs/POSTQUANTUM.md "Safety numbers": the fingerprint covers BOTH identity keys, so a
+    // quantum adversary cannot produce a colliding identity. Every account created by this
+    // client always has a pq identity; a contact's is appended only once known (a genuinely
+    // classical-only contact never has one, and both sides agree not to include it).
+    const ourPq = await this.pqLoadIdentity();
+    const ourFingerprintKey = ourPq ? concatBytes(new Uint8Array(localKp.pubKey), ourPq.publicKey) : new Uint8Array(localKp.pubKey);
+    const theirFingerprintKey = c.pqIdentityKeyB64 ? concatBytes(new Uint8Array(theirKey), b64Decode(c.pqIdentityKeyB64)) : new Uint8Array(theirKey);
     const digits = safetyNumberFor(
       this.acct.username,
-      new Uint8Array(localKp.pubKey),
+      ourFingerprintKey,
       username,
-      new Uint8Array(theirKey),
+      theirFingerprintKey,
     );
     return { digits, verified: c.verified, identityChanged: !!c.identityChanged };
   }
@@ -643,6 +804,36 @@ export class MessengerImpl implements Messenger {
     await this.deliverToUser(username, content, { forceIdentified: true });
   }
 
+  /** Wraps one outgoing Signal ciphertext in the post-quantum outer layer (docs/POSTQUANTUM.md
+   *  "The outer layer, per message"). Every outgoing Signal ciphertext goes through this before
+   *  it reaches api.sendMessages. Falls back to marking the content classical-only (marker 0,
+   *  bytes untouched) for a confirmed classical-only contact, or -- defensively, should
+   *  deliverToUser ever be reached without a prior establishSession -- when no hybrid session
+   *  or identity is available, rather than dropping the message. */
+  private async pqWrapOutgoing(to: string, rawSignalCiphertext: Uint8Array): Promise<Uint8Array> {
+    const contact = await this.store.get<StoredContact>("contacts", to);
+    if (contact?.classicalOnly) return concatBytes(new Uint8Array([PQW_CLASSICAL]), rawSignalCiphertext);
+
+    const key = pqSessionKey(to);
+    const peer = await this.store.get<PqPeerSession>("sessions", key);
+    const pqIdentity = peer ? await this.pqLoadIdentity() : undefined;
+    if (!peer || !pqIdentity) return concatBytes(new Uint8Array([PQW_CLASSICAL]), rawSignalCiphertext);
+
+    const state = deserializePqSession(peer.state);
+    const pending = peer.pendingInit;
+    const init = pending
+      ? { ctSigned: b64Decode(pending.ctSignedB64), ctOneTime: pending.ctOneTimeB64 ? b64Decode(pending.ctOneTimeB64) : null }
+      : null;
+    const sealed = pqSeal(state, rawSignalCiphertext, { pqIdentitySecret: pqIdentity.secretKey, init });
+    await this.store.put("sessions", key, { state: serializePqSession(state), pendingInit: null } satisfies PqPeerSession);
+
+    if (pending) {
+      const header = buildOpenerHeader(b64Decode(pending.ephPubB64), pqIdentity.publicKey, pending.oneTimeKeyId);
+      return concatBytes(new Uint8Array([PQW_OPENER]), header, sealed);
+    }
+    return concatBytes(new Uint8Array([PQW_ORDINARY]), sealed);
+  }
+
   /** Encrypts and sends one content payload to one user, choosing sealed vs identified delivery. */
   private async deliverToUser(to: string, content: Content, opts: { forceIdentified?: boolean } = {}): Promise<void> {
     await this.ensureSession(to);
@@ -654,13 +845,15 @@ export class MessengerImpl implements Messenger {
     } catch (e) {
       throw this.wrapIdentityError(to, e);
     }
+    const wrapped = await this.pqWrapOutgoing(to, b64Decode(cipher.content));
+    const wrappedContentB64 = b64Encode(wrapped);
     if (!opts.forceIdentified && contact?.hasDeliveryToken && contact.deliveryToken) {
       const theirIdentity = await this.signalStore.getTrustedIdentity(to);
       if (!theirIdentity) throw new Error(`no trusted identity for ${to}`);
-      const sealed = await sealMessage(theirIdentity, { from: this.me(), deviceId: DEVICE_ID, type: cipher.type, content: cipher.content });
+      const sealed = await sealMessage(theirIdentity, { from: this.me(), deviceId: DEVICE_ID, type: cipher.type, content: wrappedContentB64 });
       await this.api.sendMessages(to, [{ destinationDeviceId: DEVICE_ID, type: SEALED_TYPE, content: sealed }], contact.deliveryToken);
     } else {
-      await this.api.sendMessages(to, [{ destinationDeviceId: DEVICE_ID, type: cipher.type, content: cipher.content }]);
+      await this.api.sendMessages(to, [{ destinationDeviceId: DEVICE_ID, type: cipher.type, content: wrappedContentB64 }]);
     }
   }
 
@@ -1097,6 +1290,12 @@ export class MessengerImpl implements Messenger {
     if (!contact) {
       const theirKey = await this.signalStore.getTrustedIdentity(sender);
       contact = { username: sender, verified: false, addedAt: now, hasDeliveryToken: false, identityKeyB64: theirKey ? b64Encode(theirKey) : "" };
+    } else if (!contact.identityKeyB64) {
+      // The post-quantum opener handler (pqUnwrapIncoming) may have created this contact
+      // stub before the Signal library had learned the sender's classical identity key
+      // (see the "post-quantum hybrid layer" comment above); backfill it now that it's known.
+      const theirKey = await this.signalStore.getTrustedIdentity(sender);
+      if (theirKey) contact.identityKeyB64 = b64Encode(theirKey);
     }
     if (profile.name) contact.displayName = profile.name;
     if (profile.deliveryToken) {
@@ -1244,6 +1443,79 @@ export class MessengerImpl implements Messenger {
     }
   }
 
+  /** Unwraps one incoming post-quantum outer layer, returning the raw Signal ciphertext bytes
+   *  for the library to decrypt (docs/POSTQUANTUM.md "The outer layer, per message"). Every
+   *  incoming Signal ciphertext goes through this before the Signal library sees it. See the
+   *  "post-quantum hybrid layer" comment above `PQW_CLASSICAL` for the wire framing and for why
+   *  a brand-new opener's identity fields have to travel here rather than being learned from
+   *  the (as yet unopened) Signal ciphertext. */
+  private async pqUnwrapIncoming(sender: string, wrapped: Uint8Array): Promise<Uint8Array> {
+    if (wrapped.length < 1) throw new Error("empty post-quantum envelope");
+    const marker = wrapped[0];
+    const rest = wrapped.slice(1);
+    const key = pqSessionKey(sender);
+    const contact = await this.store.get<StoredContact>("contacts", sender);
+
+    if (marker === PQW_CLASSICAL) {
+      const existingPeer = await this.store.get<PqPeerSession>("sessions", key);
+      if (existingPeer || contact?.pqIdentityKeyB64) throw new PqDowngradeError(sender);
+      return rest;
+    }
+
+    if (marker === PQW_OPENER) {
+      const { ephPub, senderPqIdentityPub, oneTimeKeyId, rest: pqWire } = parseOpenerHeader(rest);
+      const ourClassical = await this.mustClassicalIdentity();
+      const ourPqIdentity = await this.pqLoadIdentity();
+      const signedPreKey = await this.pqLoadSignedPreKey();
+      if (!ourPqIdentity || !signedPreKey) throw new Error("no post-quantum identity/signed prekey to accept a session with");
+
+      const hasOneTime = oneTimeKeyId !== null;
+      let oneTimeSecret: Uint8Array | undefined;
+      if (oneTimeKeyId !== null) {
+        const consumed = await this.pqTakeOneTimePreKey(oneTimeKeyId);
+        if (!consumed) throw new Error("post-quantum one-time prekey already used or unknown");
+        oneTimeSecret = consumed;
+      }
+      const { ctSigned, ctOneTime } = parseInitFieldsFromPqWire(pqWire, hasOneTime);
+      const classicalSecret = await classicalAgreement(ephPub, ourClassical.privKey);
+
+      const state = acceptPqSession({
+        classicalSecret,
+        ctSigned,
+        ctOneTime,
+        signedPreKeySecret: signedPreKey.secretKey,
+        oneTimePreKeySecret: oneTimeSecret,
+        initiatorIdentity: ephPub,
+        responderIdentity: ourClassical.pubBytes,
+        pqIdentities: concatBytes(senderPqIdentityPub, ourPqIdentity.publicKey),
+      });
+      // See setupPqSessionAsInitiator: we advertised our signed prekey, so that is the key a
+      // peer's first re-key toward us will target.
+      state.myKemPair = { publicKey: signedPreKey.publicKey, secretKey: signedPreKey.secretKey };
+
+      const inner = pqOpen(state, pqWire, { peerPqIdentity: senderPqIdentityPub, myKemSecret: state.myKemPair.secretKey, hasOneTime });
+      await this.store.put("sessions", key, { state: serializePqSession(state), pendingInit: null } satisfies PqPeerSession);
+
+      let c = contact;
+      if (!c) c = { username: sender, verified: false, addedAt: Date.now(), hasDeliveryToken: false, identityKeyB64: "" };
+      c.pqIdentityKeyB64 = b64Encode(senderPqIdentityPub);
+      delete c.classicalOnly;
+      await this.store.put("contacts", sender, c);
+      this.emit({ type: "contact", contact: this.toPublicContact(c) });
+      return inner;
+    }
+
+    // PQW_ORDINARY: an already-established hybrid session.
+    const peer = await this.store.get<PqPeerSession>("sessions", key);
+    if (!peer) throw new Error(`post-quantum message from ${sender} for a session we have not established`);
+    const peerPqIdentity = contact?.pqIdentityKeyB64 ? b64Decode(contact.pqIdentityKeyB64) : null;
+    if (!peerPqIdentity) throw new Error(`no known post-quantum identity for ${sender}`);
+    const state = deserializePqSession(peer.state);
+    const inner = pqOpen(state, rest, { peerPqIdentity, myKemSecret: state.myKemPair?.secretKey ?? null, hasOneTime: false });
+    await this.store.put("sessions", key, { state: serializePqSession(state), pendingInit: null } satisfies PqPeerSession);
+    return inner;
+  }
+
   private async handleEnvelope(env: import("../types").EnvelopeWire): Promise<void> {
     try {
       let sender: string;
@@ -1273,7 +1545,8 @@ export class MessengerImpl implements Messenger {
       }
       let plaintext: Uint8Array;
       try {
-        plaintext = await this.sessions.decrypt(sender, innerType, innerContent);
+        const rawSignalCiphertext = await this.pqUnwrapIncoming(sender, b64Decode(innerContent));
+        plaintext = await this.sessions.decrypt(sender, innerType, b64Encode(rawSignalCiphertext));
       } catch (e) {
         this.emitError(`could not decrypt a message from ${sender}: ${(e as Error).message}`);
         return;
@@ -1297,15 +1570,28 @@ export class MessengerImpl implements Messenger {
   private async topUpPreKeys(): Promise<void> {
     if (!this.acct) return;
     try {
-      const { oneTimePreKeyCount } = await this.api.keysCount();
-      if (oneTimePreKeyCount >= 20) return;
-      const nextId = (await this.store.get<number>("kv", "nextPreKeyId")) ?? 1;
-      const toGenerate = Math.max(0, 100 - oneTimePreKeyCount);
-      if (toGenerate === 0) return;
-      const preKeys = await generatePreKeys(nextId, toGenerate);
-      for (const pk of preKeys) await this.signalStore.storePreKey(pk.keyId, pk.keyPair);
-      await this.store.put("kv", "nextPreKeyId", nextId + toGenerate);
-      await this.api.putKeys({ oneTimePreKeys: preKeys.map(preKeyWire) });
+      const { oneTimePreKeyCount, pqOneTimePreKeyCount } = await this.api.keysCount();
+      if (oneTimePreKeyCount < 20) {
+        const nextId = (await this.store.get<number>("kv", "nextPreKeyId")) ?? 1;
+        const toGenerate = Math.max(0, 100 - oneTimePreKeyCount);
+        if (toGenerate > 0) {
+          const preKeys = await generatePreKeys(nextId, toGenerate);
+          for (const pk of preKeys) await this.signalStore.storePreKey(pk.keyId, pk.keyPair);
+          await this.store.put("kv", "nextPreKeyId", nextId + toGenerate);
+          await this.api.putKeys({ oneTimePreKeys: preKeys.map(preKeyWire) });
+        }
+      }
+      // Same trigger (below 20 remaining), independent stock, per docs/API.md GET /v1/keys/count.
+      if (pqOneTimePreKeyCount !== undefined && pqOneTimePreKeyCount < 20) {
+        const nextId = (await this.store.get<number>("kv", "pqNextPreKeyId")) ?? 1;
+        const toGenerate = Math.max(0, 100 - pqOneTimePreKeyCount);
+        if (toGenerate > 0) {
+          const keys = Array.from({ length: toGenerate }, (_, i) => ({ keyId: nextId + i, ...generatePqPreKey() }));
+          await this.pqSaveOneTimePreKeys(keys);
+          await this.store.put("kv", "pqNextPreKeyId", nextId + toGenerate);
+          await this.api.putKeys({ pqOneTimePreKeys: keys.map((k) => ({ keyId: k.keyId, publicKey: b64Encode(k.publicKey) })) });
+        }
+      }
     } catch {
       /* best effort; will retry on the next queue-empty */
     }
@@ -1422,8 +1708,29 @@ export class MessengerImpl implements Messenger {
     const contacts = (await this.store.getAll<StoredContact>("contacts")).map((r) => r.value);
     const chats = await this.store.getAll<Chat>("chats");
     const groups = chats.filter((r) => r.value.kind === "group" && r.value.group).map((r) => r.value);
-    const sessions = await this.store.getAll<string>("sessions");
-    const payload = { v: 1, account: this.acct, identityKeyPair: kp, registrationId: regId, deliveryToken, contacts, groups, sessions };
+    const sessions = await this.store.getAll<string>("sessions"); // includes the pq per-peer chains (key "pq:<username>")
+    // Post-quantum private key material (docs/POSTQUANTUM.md), so a restored device can still
+    // decrypt: sign future re-keys/openers (identity), and accept new incoming sessions and
+    // any pending re-key targeting our currently-published signed prekey.
+    const pqIdentity = await this.pqLoadIdentity();
+    const pqSignedPreKey = await this.pqLoadSignedPreKey();
+    const pqOneTimeRaw = await this.store.getAll<{ publicKey: Uint8Array; secretKey: Uint8Array }>("prekeys");
+    const pqOneTimeKeys = pqOneTimeRaw.filter((r) => r.key.startsWith("pq:"));
+    const pqNextPreKeyId = await this.store.get<number>("kv", "pqNextPreKeyId");
+    const payload = {
+      v: 1,
+      account: this.acct,
+      identityKeyPair: kp,
+      registrationId: regId,
+      deliveryToken,
+      contacts,
+      groups,
+      sessions,
+      pqIdentity,
+      pqSignedPreKey,
+      pqOneTimeKeys,
+      pqNextPreKeyId,
+    };
     const salt = randomBytes(16);
     const key = await deriveKeyBytes(passphrase, salt, PBKDF2_ITERATIONS);
     const iv = randomBytes(12);
@@ -1452,6 +1759,10 @@ export class MessengerImpl implements Messenger {
       contacts: StoredContact[];
       groups: Chat[];
       sessions: Array<{ key: string; value: string }>;
+      pqIdentity?: PqKeyPair;
+      pqSignedPreKey?: { keyId: number; publicKey: Uint8Array; secretKey: Uint8Array };
+      pqOneTimeKeys?: Array<{ key: string; value: { publicKey: Uint8Array; secretKey: Uint8Array } }>;
+      pqNextPreKeyId?: number;
     };
     await this.signalStore.setIdentity({ identityKeyPair: payload.identityKeyPair, registrationId: payload.registrationId });
     if (payload.deliveryToken) await this.store.put("kv", "deliveryToken", payload.deliveryToken);
@@ -1466,6 +1777,10 @@ export class MessengerImpl implements Messenger {
     }
     for (const g of payload.groups) await this.store.put("chats", g.id, g);
     for (const s of payload.sessions) await this.store.put("sessions", s.key, s.value);
+    if (payload.pqIdentity) await this.pqSaveIdentity(payload.pqIdentity);
+    if (payload.pqSignedPreKey) await this.pqSaveSignedPreKey(payload.pqSignedPreKey);
+    if (payload.pqOneTimeKeys) for (const e of payload.pqOneTimeKeys) await this.store.put("prekeys", e.key, e.value);
+    if (payload.pqNextPreKeyId !== undefined) await this.store.put("kv", "pqNextPreKeyId", payload.pqNextPreKeyId);
     this.acct = payload.account;
     await this.store.put("kv", "account", this.acct);
     this.locked = false;

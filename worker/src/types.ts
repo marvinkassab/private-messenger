@@ -4,7 +4,9 @@ import type { Invite } from "./invite";
 export interface Env {
   MAILBOX: DurableObjectNamespace<Mailbox>;
   INVITE: DurableObjectNamespace<Invite>;
-  ATTACHMENTS: R2Bucket;
+  /* Optional so the Worker deploys before the bucket exists. Without it,
+     messaging works and only attachments are refused, with a clear reason. */
+  ATTACHMENTS?: R2Bucket;
   ALLOWED_ORIGINS?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
@@ -98,7 +100,9 @@ declare global {
     interface Env {
       MAILBOX: DurableObjectNamespace<Mailbox>;
       INVITE: DurableObjectNamespace<Invite>;
-      ATTACHMENTS: R2Bucket;
+      /* Optional so the Worker deploys before the bucket exists. Without it,
+     messaging works and only attachments are refused, with a clear reason. */
+  ATTACHMENTS?: R2Bucket;
       ALLOWED_ORIGINS?: string;
       VAPID_PUBLIC_KEY?: string;
       VAPID_PRIVATE_KEY?: string;

@@ -6,6 +6,11 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.toml" },
       miniflare: {
+        // The R2 binding is commented out in wrangler.toml so the Worker can
+        // be deployed before the bucket exists. Tests bind it here so the
+        // attachment paths stay covered; the unbound case is covered
+        // separately in test/attachments.test.ts.
+        r2Buckets: ["ATTACHMENTS"],
         bindings: {
           // Test-only VAPID key pair (generated with the one-liner in README.md).
           VAPID_PUBLIC_KEY: "BJTWg67IHOcOJxa-RwzlsxXlJBGJMW5scarb2O9YOzd_N_xxTg9ploDkd6FI3OYRt0KKTvhwzrHEoRgY-dlGTsQ",

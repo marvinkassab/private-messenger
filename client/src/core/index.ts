@@ -22,4 +22,4 @@ export function createMessenger(opts: MessengerOptions): Messenger {
 }
 
 export type { MessengerDeps } from "./messenger";
-export { IdentityChangedError, MessengerImpl } from "./messenger";
+export { IdentityChangedError, PqDowngradeError, MessengerImpl } from "./messenger";

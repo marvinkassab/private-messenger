@@ -104,3 +104,39 @@ describe("attachments", () => {
     expect(big.status).toBe(413);
   });
 });
+
+describe("without an R2 bucket configured", () => {
+  // The binding is optional so the Worker deploys before R2 is set up. In
+  // that state messaging must keep working and only attachments are refused,
+  // with a message that says what to do rather than a generic 500.
+  const noBucket = {} as unknown as import("../src/types").Env;
+
+  it("refuses an upload with 503 and names the missing bucket", async () => {
+    const { storeAttachment } = await import("../src/attachments");
+    // A fresh request each time: the body is a stream, and reading it once
+    // locks it.
+    const upload = () =>
+      storeAttachment(
+        new Request("http://localhost/v1/attachments", { method: "POST", body: new Uint8Array([1, 2, 3]) }),
+        noBucket,
+      );
+    await expect(upload()).rejects.toMatchObject({ status: 503, code: "attachments_unavailable" });
+    // The message has to say what to create, not just that something failed.
+    await expect(upload()).rejects.toThrow(/private-messenger-attachments/);
+  });
+
+  it("refuses a download with the same 503", async () => {
+    const { getAttachment } = await import("../src/attachments");
+    await expect(getAttachment(noBucket, "a".repeat(64))).rejects.toMatchObject({
+      status: 503,
+      code: "attachments_unavailable",
+    });
+  });
+
+  it("messaging is untouched: the health endpoint still answers", async () => {
+    const { SELF } = await import("cloudflare:test");
+    const res = await SELF.fetch("http://localhost/v1/health");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+});

@@ -168,9 +168,14 @@ commands are correct as written: wrangler picks up `worker/wrangler.toml`
 beside it, and the build step is a no-op because wrangler compiles the Worker
 itself during the deploy.
 
-Before the first deploy, open **R2** in the sidebar once and create a bucket
-named exactly `private-messenger-attachments`. Add a lifecycle rule under its
-settings to delete objects after 30 days. The Worker binds to it by name.
+Attachments are optional and off by default, so this deploys without any
+storage set up. Messages, groups, safety numbers and everything else work;
+photos and files are refused with a message explaining why.
+
+To turn them on: open **R2 Object Storage** in the sidebar, create a bucket
+named exactly `private-messenger-attachments`, add a lifecycle rule under its
+settings to delete objects after 30 days, then uncomment the three
+`r2_buckets` lines in `worker/wrangler.toml` and push.
 
 Then, in the Worker's **Settings → Variables and Secrets**, add four secrets
 (type *Secret*, not *Text*):
