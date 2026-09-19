@@ -664,7 +664,7 @@ export class MessengerImpl implements Messenger {
     const ciphertext = await this.api.downloadAttachment(pointer.id);
     const plaintext = await decryptAttachment(ciphertext, pointer);
     await this.store.put("attachments", messageId, toArrayBuffer(plaintext));
-    return new Blob([plaintext], { type: stored.attachment.mime });
+    return new Blob([toArrayBuffer(plaintext)], { type: stored.attachment.mime });
   }
 
   async retry(messageId: string): Promise<Message> {
@@ -981,7 +981,7 @@ export class MessengerImpl implements Messenger {
           mine: false,
           sentAt: content.ts,
           receivedAt: now,
-          kind: content.kind,
+          kind: content.kind as "text" | "attachment",
           body: content.body ?? "",
           replyTo: content.replyTo,
           reactions: {},
