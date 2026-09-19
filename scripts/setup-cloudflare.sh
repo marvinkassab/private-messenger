@@ -63,28 +63,45 @@ if ! echo "$TOKEN_CHECK" | grep -q '"success":true'; then
 fi
 echo "token accepted"
 
-if ! curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+R2_OK=yes
+if ! curl -sS --max-time 20 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets" \
   | grep -q '"success":true'; then
+  R2_OK=no
   cat >&2 <<'MISSING'
 
-The token cannot see R2. Add this permission to it and run again:
+This token cannot see R2, so the bucket for encrypted attachments will be
+skipped. Everything else still works; without the bucket, messages and
+groups are fine but photos and files will fail to send.
 
-  Account -> Workers R2 Storage -> Edit
+Two ways to fix it, either is fine:
 
-(The "Edit Cloudflare Workers" template does not include R2 or Pages; both
-have to be added by hand on the token screen before you create it.)
+  a) Add this row to the token and run this again. On the token screen each
+     permission has three dropdowns and the first defaults to "Zone" --
+     change it to "Account", then search for R2:
+
+       Account -> Workers R2 Storage -> Edit
+
+  b) Or make the bucket yourself in the dashboard, which needs no token at
+     all: R2 -> Create bucket -> name it exactly
+
+       private-messenger-attachments
+
+     then set a 30-day lifecycle rule on it under the bucket's Settings.
+
+Continuing without it.
 MISSING
-  exit 1
 fi
-echo "R2 permission present"
+[[ "$R2_OK" == yes ]] && echo "R2 permission present"
 
 say "Installing dependencies"
 (cd worker && npm install --legacy-peer-deps --workspaces=false >/dev/null)
 (cd client && npm install --legacy-peer-deps --workspaces=false >/dev/null)
 
 say "Creating the R2 bucket for encrypted attachments"
-if wr r2 bucket list 2>/dev/null | grep -q "$BUCKET"; then
+if [[ "$R2_OK" != yes ]]; then
+  echo "skipped: the token has no R2 permission (see the note above)"
+elif wr r2 bucket list 2>/dev/null | grep -q "$BUCKET"; then
   echo "already exists: $BUCKET"
 else
   wr r2 bucket create "$BUCKET"
