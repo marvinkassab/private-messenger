@@ -140,75 +140,91 @@ npm run e2e               # full stack in Chromium
 
 ## Setting it up on GitHub and Cloudflare
 
-You need a GitHub account and a Cloudflare account (the free plan works).
+Nothing here pushes to Cloudflare. Cloudflare is connected to the GitHub
+repository and builds itself on every push to `main`. No API token is needed,
+and no Cloudflare credential ever has to leave your browser.
 
 ### 1. GitHub
 
-1. Create a repository, for example `private-messenger`, and push this code
-   to its `main` branch.
-2. In the repository, open **Settings → Secrets and variables → Actions**.
-   Add two **secrets**: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
-   (created in step 2 below), and two **variables**: `API_URL` and
-   `PAGES_PROJECT` (values from steps 3 and 4).
+Create a repository, for example `private-messenger`, and push this code to
+`main`. That is all GitHub needs; the included workflow only runs tests.
 
-### 2. Cloudflare account pieces
+### 2. The Worker (the server)
 
-1. Dashboard sidebar: copy your **Account ID**.
-2. **My Profile → API Tokens → Create Token**, choose the **Edit Cloudflare
-   Workers** template, then add two permissions before creating it, because
-   the template does not include either:
+**Workers & Pages → Create → Workers → Import a repository**, choose this
+repository, then set:
 
-   | Type | Resource | Level |
-   | --- | --- | --- |
-   | Account | Workers R2 Storage | Edit |
-   | Account | Cloudflare Pages | Edit |
+| Field | Value |
+| --- | --- |
+| Deploy command | `npx wrangler deploy --config worker/wrangler.toml` |
+| Root directory | leave empty |
 
-   Or use **Create Custom Token** with these five rows: Workers Scripts
-   (Edit), Workers R2 Storage (Edit), Cloudflare Pages (Edit), Account
-   Settings (Read), and Zone → Workers Routes (Edit). Under **Account
-   Resources**, select your account. Copy the token.
-3. **R2 → Create bucket** named `private-messenger-attachments`. In the
-   bucket's **Settings → Object lifecycle rules**, add a rule that deletes
-   objects 30 days after upload.
+Before the first deploy, open **R2** in the sidebar once and create a bucket
+named exactly `private-messenger-attachments`. Add a lifecycle rule under its
+settings to delete objects after 30 days. The Worker binds to it by name.
 
-### 3. The Worker (API)
+Then, in the Worker's **Settings → Variables and Secrets**, add four secrets
+(type *Secret*, not *Text*):
 
-One script does the rest. With Node 22 installed:
+| Name | Value |
+| --- | --- |
+| `VAPID_PUBLIC_KEY` | from the command below |
+| `VAPID_PRIVATE_KEY` | from the command below |
+| `VAPID_SUBJECT` | `mailto:you@example.com` |
+| `BOOTSTRAP_INVITE` | any long random string; this is your first invite code |
+
+Generate the push keys on your own machine, with Node installed:
 
 ```
-export CLOUDFLARE_API_TOKEN=...      # from step 2
-export CLOUDFLARE_ACCOUNT_ID=...     # from step 2
-./scripts/setup-cloudflare.sh
+node -e "const k=require('crypto').generateKeyPairSync('ec',{namedCurve:'prime256v1'});const b=(x)=>x.toString('base64url');console.log('PUBLIC  '+b(k.publicKey.export({type:'spki',format:'der'}).subarray(-65)));console.log('PRIVATE '+b(k.privateKey.export({type:'pkcs8',format:'der'}).subarray(36,68)))"
 ```
 
-It creates the R2 bucket, generates the push keys, stores the four secrets,
-deploys the Worker, prints its URL and your first invite code, and tells you
-the values to paste into GitHub. It is safe to run again.
+`keep_vars` is set in `worker/wrangler.toml`, so later deploys leave these
+secrets, and anything else configured in the dashboard, untouched.
 
-### 4. The client (Pages)
+### 3. The client (the app)
 
-1. **Workers & Pages → Create → Pages → Connect to Git**, choose the
-   repository.
-2. Build settings: framework **None**, build command
-   `cd client && npm install --legacy-peer-deps && npm run build`,
-   build output directory `client/dist`, and an environment variable
-   `VITE_API_URL` = the Worker URL the script printed.
-3. Deploy. The project name you chose is `PAGES_PROJECT`; the site is at
-   `https://<project>.pages.dev`.
-4. Put that URL into `ALLOWED_ORIGINS` in `worker/wrangler.toml`, commit and
-   push. Optionally add a custom domain such as `chat.yourdomain.com`, and
-   list it there too.
+**Workers & Pages → Create → Pages → Connect to Git**, choose the same
+repository, then set:
 
-After this, every push to `main` runs the tests and redeploys both halves.
+| Field | Value |
+| --- | --- |
+| Framework preset | None |
+| Build command | `cd client && npm install --legacy-peer-deps && npm run build` |
+| Build output directory | `client/dist` |
+| Environment variable | `VITE_API_URL` = the Worker URL from step 2 |
+
+### 4. Let the two halves find each other
+
+Edit `ALLOWED_ORIGINS` in `worker/wrangler.toml` to your Pages URL, for
+example `https://private-messenger.pages.dev`, commit and push. The Worker
+redeploys itself. A browser origin not listed there is refused, so the app
+would load and then fail to reach the server.
+
+Optionally add a custom domain to the Pages project, such as
+`chat.yourdomain.com`, and list that too.
+
+From here on, the whole pipeline is one `git push`: the tests run on GitHub,
+and Cloudflare rebuilds and deploys both halves. The deploy finishes a little
+after the push returns, on Cloudflare's side, so a new build can take a reload
+or two to reach a phone.
 
 ### 5. First users
 
-Open the site, register with `BOOTSTRAP_INVITE` as the invite code, then
-mint invites from Settings for everyone else and send them the links.
-When everyone you want is in, clear the bootstrap code:
+Open the site, register with `BOOTSTRAP_INVITE` as the invite code, then mint
+invites from Settings for everyone else and send them the links. When
+everyone is in, delete the `BOOTSTRAP_INVITE` secret in the dashboard so
+nobody else can register with it.
+
+### If the repository connection is ever removed
+
+The manual fallback, from your own machine:
 
 ```
-cd worker && npx wrangler secret delete BOOTSTRAP_INVITE
+cd worker
+npm install --legacy-peer-deps
+npx wrangler login
+npx wrangler deploy
 ```
 
 ## What is Signal-grade here, and what is not

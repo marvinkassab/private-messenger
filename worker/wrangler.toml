@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Anything set in the Cloudflare dashboard survives a deploy: the secrets
+# below, and the R2 binding if it is bound there rather than here.
+keep_vars = true
+
+# Where the client is served from. Edit this to your Pages URL and push; the
+# deploy follows the push. A browser origin not listed here is refused by
+# CORS, so the app would load and then fail to reach the server.
 [vars]
 ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
@@ -20,5 +27,7 @@ new_sqlite_classes = ["Mailbox", "Invite"]
 binding = "ATTACHMENTS"
 bucket_name = "private-messenger-attachments"
 
-# Secrets (set with `wrangler secret put`): VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
-# VAPID_SUBJECT, BOOTSTRAP_INVITE
+# Secrets live only in the Cloudflare dashboard, never in this repository:
+#   VAPID_PUBLIC_KEY   VAPID_PRIVATE_KEY   VAPID_SUBJECT   BOOTSTRAP_INVITE
+# Settings -> Variables and Secrets -> Add, type Secret. `keep_vars` above
+# means a deploy leaves them alone.
