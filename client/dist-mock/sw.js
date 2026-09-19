@@ -13,8 +13,8 @@ self.addEventListener("push", (event) => {
     if (clients.some((c) => c.visibilityState === "visible")) return;
     await self.registration.showNotification("New message", {
       body: "Open Private Messenger to read it.",
-      icon: "/icons/icon.svg",
-      badge: "/icons/icon-maskable.svg",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
       tag: "pm-new-message",
       renotify: true,
       data: { url: self.registration.scope },

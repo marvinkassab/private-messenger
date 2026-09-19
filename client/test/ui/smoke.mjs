@@ -25,6 +25,20 @@ let failures = 0;
 const check = (ok, label) => { console.log((ok ? "PASS " : "FAIL ") + label); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* New accounts are shown a one-time explanation that their keys live only on
+   this device, with an offer to back up. It is modal, so anything clicking
+   afterwards has to get past it. */
+async function dismissBackupIntro(page) {
+  try {
+    await page.waitForSelector('[data-test="backup-intro-later"]', { timeout: 8000 });
+    await page.click('[data-test="backup-intro-later"]');
+    await page.waitForSelector("dialog[open]", { state: "detached", timeout: 5000 }).catch(() => {});
+  } catch {
+    /* not shown: an existing account, or already dismissed */
+  }
+}
+
+
 async function waitFor(fn, { timeout = 8000, interval = 100, label = "condition" } = {}) {
   const t0 = Date.now();
   let last;
@@ -100,6 +114,7 @@ async function main() {
     await page.fill('[data-test="register-invite"]', "SMOKE-TEST-1234");
     await page.fill('[data-test="register-displayname"]', "Marvin Kassab");
     await page.click('[data-test="register-submit"]');
+    await dismissBackupIntro(page);
 
     // ---- seeded chats ----
     await page.waitForSelector('[data-test="chat-item"][data-title="Alice Nguyen"]', { timeout: 10000 });
@@ -214,6 +229,7 @@ async function main() {
     await mob.fill('[data-test="register-invite"]', "SMOKE-TEST-5678");
     await mob.fill('[data-test="register-displayname"]', "Mobile Tester");
     await mob.click('[data-test="register-submit"]');
+    await dismissBackupIntro(mob);
     await mob.waitForSelector('[data-test="chat-item"][data-title="Bob Okafor"]', { timeout: 10000 });
     await mob.click('[data-test="chat-item"][data-title="Bob Okafor"]');
     await mob.waitForSelector('[data-test="composer-input"]', { timeout: 5000 });

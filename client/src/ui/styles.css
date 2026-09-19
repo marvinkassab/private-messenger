@@ -411,3 +411,18 @@ dialog::backdrop { background: rgba(0,0,0,.42); }
   .safety .digits { grid-template-columns: repeat(3, auto); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---------- backup reminder ----------
+   Sits above the chat list until a backup exists. Loud enough to notice,
+   quiet enough to live with, because there is no account recovery and a
+   cleared browser is unrecoverable. */
+.warnbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 12px 10px; padding: 9px 11px;
+  border: 1px solid var(--border); border-left: 3px solid var(--warn, #fab219);
+  border-radius: 10px; background: var(--surface);
+  font-size: 12.5px; line-height: 1.4; color: var(--ink2);
+}
+.warnbar span { flex: 1 1 140px; min-width: 0; }
+.warnbar .btn { flex: none; }
+.hint.err { color: var(--down); }

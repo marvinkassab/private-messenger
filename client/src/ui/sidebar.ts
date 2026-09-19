@@ -5,6 +5,7 @@ import type { App } from "./app";
 import { getTheme, setTheme, type Theme } from "./app";
 import { h, clear, fmtRel, avatar, reconcile } from "./dom";
 import { icon } from "./icons";
+import { backupReminderBar } from "./backupNudge";
 
 export interface Sidebar { render(): void; renderConnection(): void }
 
@@ -32,6 +33,12 @@ export function mountSidebar(app: App, parent: HTMLElement): Sidebar {
     oninput: () => { app.s.search = search.value.trim().toLowerCase(); render(); } });
 
   const rooms = h("nav.rooms", { id: "rooms", "aria-label": "Chats" });
+  const reminderSlot = h("div", { id: "backup-reminder-slot" });
+  const drawReminder = () => {
+    reminderSlot.replaceChildren();
+    const bar = backupReminderBar(app.m, drawReminder);
+    if (bar) reminderSlot.appendChild(bar);
+  };
   const empty = h("div.side-empty", { id: "side-empty", hidden: true },
     h("p", h("strong", "No chats yet.")),
     h("p", "Add someone by their username to start a chat, or create a group."));
@@ -46,8 +53,10 @@ export function mountSidebar(app: App, parent: HTMLElement): Sidebar {
       h("button.btn.primary", { id: "btn-new-chat", type: "button", "data-test": "new-chat-btn", onclick: () => app.openNewChat() }, icon("plus"), "New chat"),
       h("button.btn", { id: "btn-new-group", type: "button", "data-test": "new-group-btn", onclick: () => app.openNewGroup() }, icon("users"), "New group")),
     h("div.search", search),
+    reminderSlot,
     rooms, empty,
   );
+  drawReminder();
   parent.appendChild(side);
 
   rooms.addEventListener("click", (e) => {

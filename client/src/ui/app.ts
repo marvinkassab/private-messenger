@@ -6,6 +6,7 @@ import { $, h, clear, toast, errorText, avatar } from "./dom";
 import { mountSidebar, type Sidebar } from "./sidebar";
 import { mountChat, type ChatView } from "./chat";
 import { showWelcome } from "./welcome";
+import { showBackupIntro } from "./backupNudge";
 import { showLock } from "./lock";
 import { openSettings } from "./settings";
 import { openDetails } from "./details";
@@ -65,6 +66,7 @@ export class App {
       await showLock(this.root, this.m);
       account = this.m.account() ?? (await this.m.init()).account;
     }
+    const isNewAccount = !account;
     if (!account) account = await showWelcome(this.root, this.m);
     this.s = {
       account, chats: new Map(), contacts: new Map(), msgs: new Map(), typing: new Map(),
@@ -74,6 +76,9 @@ export class App {
     this.mountShell();
     this.m.on((e) => this.onEvent(e));
     this.m.connect().catch((e) => toast("Could not connect: " + errorText(e), "error"));
+    /* Explained at the cheapest possible moment: the account exists but holds
+       nothing yet, so losing it now costs only a re-invite. */
+    if (isNewAccount) await showBackupIntro(this.m);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden && this.s.active) this.markReadIfVisible(this.s.active);
     });

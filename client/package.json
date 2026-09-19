@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:ui": "node test/ui/smoke.mjs"
+    "test:ui": "node test/ui/smoke.mjs",
+    "test:backup": "node test/ui/backup.mjs"
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",

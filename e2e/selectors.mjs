@@ -22,6 +22,13 @@ export async function register(page, { username, invite, name }) {
   await page.click(T("register-submit"));
   await page.waitForSelector(T("register-form"), { state: "detached", timeout: LONG });
   await page.waitForSelector(T("me-card"), { timeout: LONG });
+  // A new account gets a one-time, modal explanation that its keys live only
+  // on this device. Dismiss it, or every later click hits its backdrop.
+  await page
+    .waitForSelector(T("backup-intro-later"), { timeout: 8000 })
+    .then(() => page.click(T("backup-intro-later")))
+    .catch(() => {});
+  await dismissDialogs(page);
 }
 
 /** Attempts a registration expected to fail, and returns the error shown. */

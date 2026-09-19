@@ -3,8 +3,9 @@
 
 import type { App } from "./app";
 import { getTheme, setTheme, type Theme } from "./app";
-import { h, toast, errorText, copyText } from "./dom";
+import { h, toast, errorText, copyText, fmtRel } from "./dom";
 import { confirmDialog, promptDialog } from "./dialog";
+import { lastBackupAt, promptForBackup } from "./backupNudge";
 
 function displayNameSection(app: App): HTMLElement {
   const input = h("input", { type: "text", value: app.s.account.displayName, "data-test": "settings-displayname", maxLength: 60 });
@@ -106,22 +107,19 @@ function lockSection(app: App): HTMLElement {
 }
 
 function backupSection(app: App, dlg: HTMLDialogElement): HTMLElement {
+  const status = h("div.hint", { "data-test": "backup-status" });
+  const drawStatus = () => {
+    const at = lastBackupAt();
+    status.textContent = at
+      ? `Last backup ${fmtRel(at)}. Make a new one after adding people or devices.`
+      : "No backup yet. Without one, clearing this browser's data would lose this account for good.";
+    status.classList.toggle("err", at === null);
+  };
+  drawStatus();
+
   const exportBtn = h("button.btn.sm", {
     type: "button", "data-test": "backup-export-btn",
-    onclick: () => promptDialog({
-      title: "Export backup", desc: "Choose a passphrase to lock the backup file.",
-      label: "Passphrase", type: "password", minLength: 6, submitLabel: "Export",
-      submit: async (value) => {
-        if (value.length < 6) throw new Error("At least 6 characters.");
-        const blob = await app.m.exportBackup(value);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `private-messenger-backup-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 30_000);
-        toast("Backup exported");
-      },
-    }),
+    onclick: async () => { await promptForBackup(app.m); drawStatus(); },
   }, "Export backup");
   const fileInput = h("input", {
     type: "file", hidden: true, accept: "application/json", "data-test": "backup-import-input",
@@ -145,6 +143,7 @@ function backupSection(app: App, dlg: HTMLDialogElement): HTMLElement {
   const importBtn = h("button.btn.sm", { type: "button", "data-test": "backup-import-btn", onclick: () => fileInput.click() }, "Import backup");
   return h("div.field", h("div.lbl", "Backup"),
     h("div.hint", "A backup holds your identity and contacts, locked with a passphrase."),
+    status,
     h("div.rowbtns", exportBtn, importBtn, fileInput));
 }
 

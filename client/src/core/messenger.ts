@@ -1565,9 +1565,27 @@ export class MessengerImpl implements Messenger {
     if (!peer) throw new Error(`post-quantum message from ${sender} for a session we have not established`);
     const peerPqIdentity = contact?.pqIdentityKeyB64 ? b64Decode(contact.pqIdentityKeyB64) : null;
     if (!peerPqIdentity) throw new Error(`no known post-quantum identity for ${sender}`);
-    const state = deserializePqSession(peer.recv);
-    const inner = pqOpen(state, rest, { peerPqIdentity, myKemSecret: state.myKemPair?.secretKey ?? null, hasOneTime: false });
-    await this.store.put("sessions", key, { send: peer.send, recv: serializePqSession(state), pendingInit: peer.pendingInit } satisfies PqPeerSession);
+    const recvState = deserializePqSession(peer.recv);
+    const hadPeerKemBefore = recvState.peerKemPublic;
+    const inner = pqOpen(recvState, rest, { peerPqIdentity, myKemSecret: recvState.myKemPair?.secretKey ?? null, hasOneTime: false });
+
+    // In a one-sided contact (only the initiator ever fetched a bundle), the responder's own
+    // outbound chain starts with no re-key target at all (see the PqPeerSession comment
+    // above): they never published anything for the initiator's FIRST session-establishing
+    // encapsulation to target back. The peer's first re-key on the chain we just opened is the
+    // first KEM public key of theirs we learn afterwards -- reuse it as our own outbound
+    // chain's target too, so both directions gain an independent re-key cadence once any one
+    // re-key has happened, rather than the responder's outbound chain staying dormant forever.
+    let sendState = deserializePqSession(peer.send);
+    if (recvState.peerKemPublic && !hadPeerKemBefore && !sendState.peerKemPublic) {
+      sendState = { ...sendState, peerKemPublic: recvState.peerKemPublic };
+    }
+
+    await this.store.put("sessions", key, {
+      send: serializePqSession(sendState),
+      recv: serializePqSession(recvState),
+      pendingInit: peer.pendingInit,
+    } satisfies PqPeerSession);
     return inner;
   }
 
