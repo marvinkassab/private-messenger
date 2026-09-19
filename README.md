@@ -156,8 +156,16 @@ repository, then set:
 
 | Field | Value |
 | --- | --- |
-| Deploy command | `npx wrangler deploy --config worker/wrangler.toml` |
-| Root directory | leave empty |
+| Root directory | `worker` |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+
+The root directory matters. Left at `/`, the build runs the *client's* build
+with none of its dependencies installed, and wrangler finds no config, which
+is exactly how the first attempt fails. Pointed at `worker`, all three
+commands are correct as written: wrangler picks up `worker/wrangler.toml`
+beside it, and the build step is a no-op because wrangler compiles the Worker
+itself during the deploy.
 
 Before the first deploy, open **R2** in the sidebar once and create a bucket
 named exactly `private-messenger-attachments`. Add a lifecycle rule under its
