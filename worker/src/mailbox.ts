@@ -13,6 +13,11 @@ import { b64Decode, createIdGenerator } from "./util";
 
 export const MAX_ONE_TIME_PREKEYS = 200;
 export const MAX_QUEUE = 1000;
+/* A mailbox also has a byte budget, because attachments now travel inside
+   messages rather than in separate storage. Without this, one sender could
+   park a gigabyte in someone's queue. The oldest envelopes go first when
+   either limit is passed. */
+export const MAX_QUEUE_BYTES = 64 * 1024 * 1024;
 export const ENVELOPE_TTL_DAYS = 30;
 export const DRAIN_LIMIT = 100;
 
@@ -311,14 +316,36 @@ export class Mailbox extends DurableObject<Env> {
         );
         envelopes.push(env);
       }
-      // Cap the queue at MAX_QUEUE, dropping the oldest.
+      // Cap the queue by count and by total size, dropping the oldest first.
       const n = Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM envelopes").one().n);
       if (n > MAX_QUEUE) {
         this.sql.exec("DELETE FROM envelopes WHERE id IN (SELECT id FROM envelopes ORDER BY id ASC LIMIT ?)", n - MAX_QUEUE);
       }
+      this.trimToByteBudget();
     });
     const delivered = this.broadcast(envelopes);
     if (!delivered) this.maybePush(Date.now());
+  }
+
+  /**
+   * Drops the oldest envelopes until the mailbox fits its byte budget.
+   * Deliberately by oldest rather than largest: dropping the big ones would
+   * silently lose exactly the photos someone was waiting for, while dropping
+   * the oldest is the same rule the count limit already uses.
+   */
+  private trimToByteBudget(): void {
+    let total = Number(
+      this.sql.exec<{ b: number }>("SELECT COALESCE(SUM(LENGTH(content)), 0) AS b FROM envelopes").one().b,
+    );
+    if (total <= MAX_QUEUE_BYTES) return;
+    const rows = this.sql
+      .exec<{ id: string; n: number }>("SELECT id, LENGTH(content) AS n FROM envelopes ORDER BY id ASC")
+      .toArray();
+    for (const row of rows) {
+      if (total <= MAX_QUEUE_BYTES) break;
+      this.sql.exec("DELETE FROM envelopes WHERE id = ?", row.id);
+      total -= Number(row.n);
+    }
   }
 
   /** Deletes envelopes past their 30-day lifetime. */

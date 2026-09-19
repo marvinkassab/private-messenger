@@ -184,7 +184,13 @@ export async function registerUser(prefix = "user", opts: { prekeys?: number; in
 }
 
 export function randomContent(bytes = 64): string {
-  return b64Encode(crypto.getRandomValues(new Uint8Array(bytes)));
+  // getRandomValues refuses more than 64 KB at a time, and attachments now
+  // travel inside messages, so test payloads run to hundreds of kilobytes.
+  const out = new Uint8Array(bytes);
+  for (let i = 0; i < bytes; i += 65536) {
+    crypto.getRandomValues(out.subarray(i, Math.min(i + 65536, bytes)));
+  }
+  return b64Encode(out);
 }
 
 export async function sendTo(from: Identity, to: string, content = randomContent(), type = 1) {

@@ -18,6 +18,10 @@ interface MailboxRecord {
   oneTimePreKeys: Map<number, string>;
   queue: EnvelopeWire[];
   pushSubscription?: PushSubscriptionWire;
+  /* Post-quantum half (docs/POSTQUANTUM.md / docs/API.md); absent for a pre-PQ account. */
+  pqIdentityKey?: string;
+  pqSignedPreKey?: { keyId: number; publicKey: string; signature: string; pqSignature: string };
+  pqOneTimePreKeys: Map<number, string>;
 }
 
 interface InviteRecord {
@@ -159,6 +163,16 @@ export class FakeServer {
     return this.attachments.get(id);
   }
 
+  /** Test-only: simulate a server that strips (or never had) the post-quantum half of a
+   *  bundle, e.g. to exercise downgrade-detection. */
+  stripPqKeys(username: string): void {
+    const mb = this.mailboxes.get(username);
+    if (!mb) return;
+    mb.pqIdentityKey = undefined;
+    mb.pqSignedPreKey = undefined;
+    mb.pqOneTimePreKeys = new Map();
+  }
+
   /* ---------- used by FakeTransport ---------- */
 
   registerLive(username: string, t: FakeTransport): void {
@@ -253,7 +267,7 @@ export class FakeServer {
       // ---- everything below requires Authorization ----
       if (method === "GET" && pathname === "/v1/keys/count") {
         const mb = await this.verifyAuth(method, pathname, headers(init), bodyBytes);
-        return json(200, { oneTimePreKeyCount: mb.oneTimePreKeys.size });
+        return json(200, { oneTimePreKeyCount: mb.oneTimePreKeys.size, pqOneTimePreKeyCount: mb.pqOneTimePreKeys.size });
       }
       if (method === "GET" && pathname.startsWith("/v1/keys/")) {
         const mb = await this.verifyAuth(method, pathname, headers(init), bodyBytes);
@@ -267,6 +281,15 @@ export class FakeServer {
           target.oneTimePreKeys.delete(keyId);
           preKey = { keyId, publicKey };
         }
+        // One ML-KEM one-time prekey consumed per fetch, independently of the classical one
+        // (docs/API.md GET /v1/keys/:username).
+        let pqPreKey: { keyId: number; publicKey: string } | undefined;
+        const pqFirst = target.pqOneTimePreKeys.entries().next();
+        if (!pqFirst.done) {
+          const [keyId, publicKey] = pqFirst.value;
+          target.pqOneTimePreKeys.delete(keyId);
+          pqPreKey = { keyId, publicKey };
+        }
         const bundle: PreKeyBundleWire = {
           username: target.username,
           deviceId: 1,
@@ -275,6 +298,11 @@ export class FakeServer {
           signedPreKey: target.signedPreKey,
           preKey,
         };
+        if (target.pqIdentityKey && target.pqSignedPreKey) {
+          bundle.pqIdentityKey = target.pqIdentityKey;
+          bundle.pqSignedPreKey = target.pqSignedPreKey;
+          bundle.pqPreKey = pqPreKey;
+        }
         return json(200, bundle);
       }
       if (method === "PUT" && pathname === "/v1/keys") {
@@ -282,13 +310,20 @@ export class FakeServer {
         const body = JSON.parse(utf8Decode(bodyBytes)) as {
           signedPreKey?: { keyId: number; publicKey: string; signature: string };
           oneTimePreKeys?: Array<{ keyId: number; publicKey: string }>;
+          pqSignedPreKey?: { keyId: number; publicKey: string; signature: string; pqSignature: string };
+          pqOneTimePreKeys?: Array<{ keyId: number; publicKey: string }>;
         };
         if (body.signedPreKey) mb.signedPreKey = body.signedPreKey;
         if (body.oneTimePreKeys) {
           if (mb.oneTimePreKeys.size + body.oneTimePreKeys.length > 200) return errResponse(400, "bad_request", "too many prekeys");
           for (const k of body.oneTimePreKeys) mb.oneTimePreKeys.set(k.keyId, k.publicKey);
         }
-        return json(200, { oneTimePreKeyCount: mb.oneTimePreKeys.size });
+        if (body.pqSignedPreKey) mb.pqSignedPreKey = body.pqSignedPreKey;
+        if (body.pqOneTimePreKeys) {
+          if (mb.pqOneTimePreKeys.size + body.pqOneTimePreKeys.length > 200) return errResponse(400, "bad_request", "too many post-quantum prekeys");
+          for (const k of body.pqOneTimePreKeys) mb.pqOneTimePreKeys.set(k.keyId, k.publicKey);
+        }
+        return json(200, { oneTimePreKeyCount: mb.oneTimePreKeys.size, pqOneTimePreKeyCount: mb.pqOneTimePreKeys.size });
       }
       if (method === "PUT" && pathname === "/v1/profile") {
         const mb = await this.verifyAuth(method, pathname, headers(init), bodyBytes);
@@ -388,6 +423,29 @@ export class FakeServer {
     if (!spkOk) return errResponse(400, "bad_request", "bad signed prekey signature");
     if (body.oneTimePreKeys.length > 100) return errResponse(400, "bad_request", "too many one-time prekeys");
 
+    // Post-quantum half (docs/POSTQUANTUM.md): optional, but all-or-nothing. A half-upgraded
+    // account would be indistinguishable from a downgrade attack, so a partial upload is a 400.
+    // One-time prekeys require an identity (they'd be meaningless -- and unverifiable as
+    // belonging to this account -- without one).
+    const hasPqIdentity = body.pqIdentityKey !== undefined;
+    const hasPqSignedPreKey = body.pqSignedPreKey !== undefined;
+    const hasPqOneTime = body.pqOneTimePreKeys !== undefined && body.pqOneTimePreKeys.length > 0;
+    if (hasPqIdentity !== hasPqSignedPreKey) {
+      return errResponse(400, "bad_request", "post-quantum identity and signed prekey must be sent together");
+    }
+    if (hasPqOneTime && !hasPqIdentity) {
+      return errResponse(400, "bad_request", "post-quantum one-time prekeys require a post-quantum identity");
+    }
+    if (hasPqIdentity && body.pqOneTimePreKeys && body.pqOneTimePreKeys.length > 100) {
+      return errResponse(400, "bad_request", "too many post-quantum one-time prekeys");
+    }
+    if (hasPqIdentity) {
+      // The server verifies the classical (XEdDSA) signature binding the ML-KEM prekey to the
+      // classical identity key; the ML-DSA `pqSignature` is the receiving client's job (API.md).
+      const pqSpkOk = await xeddsaVerify(identityKey, b64Decode(body.pqSignedPreKey!.publicKey), b64Decode(body.pqSignedPreKey!.signature));
+      if (!pqSpkOk) return errResponse(400, "bad_request", "bad post-quantum signed prekey signature");
+    }
+
     const mb: MailboxRecord = {
       username: body.username,
       identityKey,
@@ -396,6 +454,9 @@ export class FakeServer {
       signedPreKey: body.signedPreKey,
       oneTimePreKeys: new Map(body.oneTimePreKeys.map((k) => [k.keyId, k.publicKey])),
       queue: this.mailboxes.get(body.username)?.queue ?? [],
+      pqIdentityKey: body.pqIdentityKey,
+      pqSignedPreKey: body.pqSignedPreKey,
+      pqOneTimePreKeys: new Map((body.pqOneTimePreKeys ?? []).map((k) => [k.keyId, k.publicKey])),
     };
     this.mailboxes.set(body.username, mb);
     if (!isBootstrap && invite) invite.used = true;

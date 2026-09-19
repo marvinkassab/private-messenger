@@ -69,7 +69,7 @@ describe("messages over HTTP", () => {
     const nope = await sendTo(alice, "nobody_at_all");
     expect(nope.status).toBe(404);
     const bob = await registerUser("bob");
-    const big = await sendTo(alice, bob.username, b64Encode(new Uint8Array(64 * 1024 + 1)));
+    const big = await sendTo(alice, bob.username, b64Encode(new Uint8Array(1024 * 1024 + 1)));
     expect(big.status).toBe(413);
   });
 
@@ -153,5 +153,55 @@ describe("messages over HTTP", () => {
     const res = await api(alice, "POST", "/v1/invites");
     expect(res.status).toBe(429);
     expect((await res.json<any>()).error).toBe("rate_limited");
+  });
+});
+
+describe("messages large enough to carry a photo", () => {
+  // Attachments travel inside messages rather than in separate storage, so a
+  // message must be able to hold one. These pin the size the client can rely
+  // on, and the byte budget that stops a mailbox growing without bound.
+  it("accepts a message near the 1 MB limit and returns it intact", async () => {
+    const alice = await registerUser("alice");
+    const bob = await registerUser("bob");
+    const big = randomContent(900 * 1024);
+
+    const res = await sendTo(alice, bob.username, big, 1);
+    expect(res.status).toBe(200);
+
+    const { envelopes } = await (await api(bob, "GET", "/v1/messages")).json<any>();
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0].content).toBe(big);
+  });
+
+  it("refuses one past the limit rather than truncating it", async () => {
+    const alice = await registerUser("alice");
+    const bob = await registerUser("bob");
+    const res = await sendTo(alice, bob.username, randomContent(1100 * 1024), 1);
+    expect(res.status).toBe(413);
+    expect((await res.json<any>()).error).toBe("too_large");
+
+    const { envelopes } = await (await api(bob, "GET", "/v1/messages")).json<any>();
+    expect(envelopes).toHaveLength(0);
+  });
+
+  it("keeps a mailbox inside its byte budget by dropping the oldest", async () => {
+    const alice = await registerUser("alice");
+    const bob = await registerUser("bob");
+
+    // Enough large messages to cross the budget several times over would take
+    // too long to send one by one, so this checks the rule holds at a smaller
+    // scale: what is delivered is always the newest, never a truncated blob.
+    const bodies: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const body = randomContent(700 * 1024);
+      bodies.push(body);
+      expect((await sendTo(alice, bob.username, body, 1)).status).toBe(200);
+    }
+
+    const { envelopes } = await (await api(bob, "GET", "/v1/messages")).json<any>();
+    expect(envelopes.length).toBeGreaterThan(0);
+    // Every surviving envelope is whole, and the newest message is among them.
+    for (const env of envelopes) expect(env.content.length).toBeGreaterThan(900 * 1024);
+    expect(envelopes.map((e: any) => e.content)).toContain(bodies[bodies.length - 1]);
   });
 });

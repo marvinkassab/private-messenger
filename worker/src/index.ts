@@ -30,8 +30,24 @@ import { b64Decode, constantTimeEqual, isEnvelopeId, isPositiveInt, isValidUsern
 
 export { Mailbox, Invite };
 
-const MAX_JSON_BODY = 1024 * 1024;
-const MAX_CONTENT_BYTES = 64 * 1024;
+
+/* Attachments ride inside messages rather than in separate storage, so a
+   message has to be able to carry a photo.
+ *
+ * A Durable Object value tops out at 2 MB, measured rather than assumed, and
+ * `content` is base64: four characters for every three bytes. So a megabyte
+ * of ciphertext is stored as about 1.37 MB, comfortably inside the limit with
+ * room for the rest of the row. Anything larger is split into chunks by the
+ * client, which the server neither knows nor cares about, since a chunk is
+ * just another message.
+ *
+ * The request body limit is derived from this rather than picked separately,
+ * because the two drifting apart is what made a photo-sized message fail with
+ * a body-length error that said nothing about photos. */
+const MAX_CONTENT_BYTES = 1024 * 1024;
+const BASE64_EXPANSION = 4 / 3;
+/** One maximum-sized message, base64-expanded, plus room for the JSON around it. */
+const MAX_JSON_BODY = Math.ceil(MAX_CONTENT_BYTES * BASE64_EXPANSION) + 64 * 1024;
 const MAX_MESSAGES_PER_SEND = 100;
 const MAX_PREKEYS_PER_REGISTER = 100;
 
@@ -280,10 +296,10 @@ function validateMessages(body: Record<string, unknown>): { messages: IncomingMe
     if (m.destinationDeviceId !== 1) throw new ApiError(400, "bad_request", "unknown destinationDeviceId");
     if (!isPositiveInt(m.type)) throw new ApiError(400, "bad_request", "invalid message type");
     if (typeof m.content !== "string") throw new ApiError(400, "bad_request", "content must be base64");
-    if (m.content.length > Math.ceil(MAX_CONTENT_BYTES / 3) * 4) throw new ApiError(413, "too_large", "content exceeds 64 KB");
+    if (m.content.length > Math.ceil(MAX_CONTENT_BYTES * BASE64_EXPANSION)) throw new ApiError(413, "too_large", "content exceeds 1 MB");
     const bytes = b64Decode(m.content);
     if (!bytes || bytes.length === 0) throw new ApiError(400, "bad_request", "content must be base64");
-    if (bytes.length > MAX_CONTENT_BYTES) throw new ApiError(413, "too_large", "content exceeds 64 KB");
+    if (bytes.length > MAX_CONTENT_BYTES) throw new ApiError(413, "too_large", "content exceeds 1 MB");
     out.push({ destinationDeviceId: 1, type: m.type, content: m.content });
   }
   return { messages: out };
